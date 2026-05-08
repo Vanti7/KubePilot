@@ -1,0 +1,43 @@
+# Go
+backend/vendor/
+backend/*.exe
+backend/*.test
+backend/coverage.out
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+# Environment
+.env
+*.env
+!.env.example
+!backend/.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kubernetes
+kubeconfig
+*.kubeconfig
+
+# Secrets
+*.pem
+*.key
+*.crt
+credentials.json
+
+# Build artifacts
+dist/
+build/
+
+# Docker
+.dockerignore

@@ -1,0 +1,78 @@
+{{- if .Values.integrationToken.create -}}
+# ServiceAccount and long-lived token secret for connecting remote clusters to KubePilot.
+# The token stored in the secret `kubepilot-integration-token` can be used as a kubeconfig
+# bearer token when registering this cluster (or any cluster where this SA is deployed) in
+# the KubePilot Integrations UI.
+#
+# Retrieve the token:
+#   kubectl get secret kubepilot-integration-token -n {{ .Release.Namespace }} \
+#     -o jsonpath='{.data.token}' | base64 -d
+#
+# Or use the helper script:
+#   helm get notes {{ .Release.Name }} -n {{ .Release.Namespace }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "kubepilot.fullname" . }}-integration
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubepilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: integration
+  annotations:
+    kubernetes.io/description: >
+      ServiceAccount used by KubePilot to watch Kubernetes resources.
+      The associated token secret can be used to register this cluster in KubePilot.
+---
+# Long-lived token (Kubernetes ≥1.24 style — explicit Secret of type kubernetes.io/service-account-token).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "kubepilot.fullname" . }}-integration-token
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubepilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: integration
+  annotations:
+    kubernetes.io/service-account.name: {{ include "kubepilot.fullname" . }}-integration
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubepilot.fullname" . }}-integration
+  labels:
+    {{- include "kubepilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: integration
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes", "pods", "services", "secrets", "configmaps", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "jobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubepilot.fullname" . }}-integration
+  labels:
+    {{- include "kubepilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: integration
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubepilot.fullname" . }}-integration
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubepilot.fullname" . }}-integration
+    namespace: {{ .Release.Namespace }}
+{{- end }}

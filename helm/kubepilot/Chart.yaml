@@ -1,0 +1,24 @@
+apiVersion: v2
+name: kubepilot
+description: KubePilot — SysOps cockpit for Kubernetes update tracking and risk scoring
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - sysops
+  - updates
+  - monitoring
+  - devops
+home: https://github.com/kubepilot/kubepilot
+maintainers:
+  - name: KubePilot Team
+dependencies:
+  - name: postgresql
+    version: "15.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+  - name: redis
+    version: "19.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled

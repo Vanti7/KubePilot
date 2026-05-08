@@ -1,0 +1,130 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/kubepilot/backend
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+frontend:
+  image:
+    repository: ghcr.io/kubepilot/frontend
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: "kubepilot"
+  annotations: {}
+
+rbac:
+  create: true
+
+config:
+  port: "8080"
+  logLevel: "info"
+  workerIntervalSeconds: "300"
+  tlsInsecure: "false"
+  headlampURL: ""
+  # When inCluster=true the backend auto-registers its own cluster on first startup.
+  inCluster: true
+  # Human-readable name for the auto-registered local cluster.
+  clusterName: "local"
+
+# First-run admin account.
+# If adminEmail is set and no users exist yet, an admin account is created on startup.
+# If adminPassword is left blank, a secure password is auto-generated and printed to pod logs.
+# Retrieve it with: kubectl logs -n kubepilot deploy/kubepilot-backend | grep "Admin password"
+admin:
+  email: "admin@kubepilot.local"
+  password: ""   # leave blank to auto-generate
+  name: "Administrator"
+
+secret:
+  # Set these or reference an existing secret
+  jwtSecret: ""
+  existingSecret: ""
+  existingSecretKeys:
+    jwtSecret: jwt-secret
+    dbPassword: db-password
+
+service:
+  type: ClusterIP
+  port: 80
+  backendPort: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: kubepilot.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  backend:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  frontend:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+autoscaling:
+  enabled: false
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+postgresql:
+  enabled: true
+  auth:
+    username: kubepilot
+    password: kubepilot
+    database: kubepilot
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 2Gi
+
+externalPostgresql:
+  enabled: false
+  host: ""
+  port: 5432
+  username: kubepilot
+  database: kubepilot
+  existingSecret: ""
+  existingSecretKey: db-password
+
+externalRedis:
+  enabled: false
+  host: ""
+  port: 6379
+
+# Creates a dedicated ServiceAccount + long-lived token Secret for K8s integration.
+# The token can be used to register this cluster (or remote clusters) in KubePilot.
+# Set create: false if you prefer to manage credentials externally.
+integrationToken:
+  create: true
