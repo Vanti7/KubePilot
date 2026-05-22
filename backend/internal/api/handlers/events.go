@@ -3,7 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
+	"io"
 	"time"
 
 	"github.com/gin-gonic/gin"
