@@ -111,7 +111,7 @@ func (h *EventsHandler) Stream(c *gin.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	c.Stream(func(w http.ResponseWriter) bool {
+	c.Stream(func(w io.Writer) bool {
 		select {
 		case ev, ok := <-ch:
 			if !ok {
