@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ExternalLink, Copy, Filter } from 'lucide-react'
 import clsx from 'clsx'

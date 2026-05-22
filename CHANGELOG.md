@@ -32,6 +32,8 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 
 ### Fixed
 - `helm/kubepilot/templates/deployment.yaml` — ajout de `BACKEND_URL` en variable d'env du container frontend (injecté depuis le nom de service Helm)
+- Frontend TypeScript : suppression des imports `React` inutiles dans 9 fichiers (TS6133 — `react-jsx` transform gère l'injection automatique)
+- Frontend TypeScript : ajout de `src/vite-env.d.ts` (`/// <reference types="vite/client" />`) pour résoudre `import.meta.env` (TS2339)
 - `helm/kubepilot/values.yaml` — ajout du champ `imagePullSecrets` pour Harbor (secret à créer manuellement dans chaque namespace)
 
 ---

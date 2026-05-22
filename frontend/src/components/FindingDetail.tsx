@@ -1,4 +1,3 @@
-import React from 'react'
 import { ExternalLink, Copy, Clock, Server, Package } from 'lucide-react'
 import clsx from 'clsx'
 import { SeverityBadge } from './SeverityBadge'
