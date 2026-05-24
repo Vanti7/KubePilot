@@ -50,14 +50,14 @@ func NewKubernetesCollector(cluster *models.Cluster, s *store.Store, logger *zap
 			raw = []byte(cluster.KubeconfigRef)
 		}
 		restConfig, err = clientcmd.RESTConfigFromKubeConfig(raw)
-	} else if cluster.APIEndpoint != "" {
+	} else if cluster.APIEndpoint != "" && cluster.TLSInsecure {
+		// Only use bare endpoint config when TLS verification is explicitly disabled.
 		restConfig = &rest.Config{
-			Host:    cluster.APIEndpoint,
-			TLSClientConfig: rest.TLSClientConfig{
-				Insecure: cluster.TLSInsecure,
-			},
+			Host:            cluster.APIEndpoint,
+			TLSClientConfig: rest.TLSClientConfig{Insecure: true},
 		}
 	} else {
+		// In-cluster config: loads SA token + cluster CA cert from pod-mounted secrets.
 		restConfig, err = rest.InClusterConfig()
 	}
 

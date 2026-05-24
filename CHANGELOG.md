@@ -23,6 +23,7 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 
 ### Fixed
 - `backend/internal/api/middleware/auth.go` — JWT accepte désormais `?token=` query param (requis pour SSE via EventSource qui ne peut pas envoyer de headers)
+- `backend/internal/collector/kubernetes.go` — le collecteur utilise désormais `rest.InClusterConfig()` (SA token + CA cert montés par le pod) quand `KubeconfigRef` est vide et `TLSInsecure` est false ; la branche `APIEndpoint` sans CA cert causait `x509: certificate signed by unknown authority` pour le cluster enregistré en bootstrap
 - `frontend/src/types/index.ts` — `FindingSummary` : structure plate `{total,critical,high,...}` au lieu de `{by_severity:{...}}` inexistant dans le backend ; `OverviewData` : champs alignés sur la réponse réelle (`cluster_status`, `findings_summary`, `findings_per_cluster`, `top_findings`) ; `UpdateFinding.latest_version` au lieu de `available_version`
 - `frontend/src/api/client.ts` — `getClusters()` déballe `data.data` (backend enveloppe dans `{"data":[],"total":N}`)
 - `frontend/src/components/Sidebar.tsx` — accès `summary.critical` au lieu de `summary.by_severity.critical` (TypeError fatal)
