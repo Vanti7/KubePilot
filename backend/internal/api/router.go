@@ -44,12 +44,15 @@ func NewRouter(
 	router.GET("/health/ready", healthH.Readiness)
 	router.GET("/health/connectors", healthH.Connectors)
 
-	// Auth endpoints — login and setup do not require auth, the others do.
+	// All /api/v1 routes — auth endpoints are nested here so the frontend
+	// base URL (/api/v1) resolves correctly.
+	v1 := router.Group("/api/v1")
+
+	// Auth endpoints — login and setup do not require JWT, the others do.
 	authH := handlers.NewAuthHandler(s, cfg.JWTSecret, logger)
-	authGroup := router.Group("/auth")
+	authGroup := v1.Group("/auth")
 	{
 		authGroup.POST("/login", authH.Login)
-		// Setup endpoints: only active when no users exist yet.
 		authGroup.GET("/setup", authH.SetupStatus)
 		authGroup.POST("/setup", authH.Setup)
 
@@ -61,9 +64,6 @@ func NewRouter(
 			authProtected.POST("/users", middleware.RequireRole("admin"), authH.CreateUser)
 		}
 	}
-
-	// All /api/v1 routes require JWT.
-	v1 := router.Group("/api/v1")
 	v1.Use(middleware.JWTAuth(cfg.JWTSecret))
 
 	// Clusters.
