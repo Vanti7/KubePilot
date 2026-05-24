@@ -26,22 +26,26 @@ const ContextKeyEmail = "user_email"
 const ContextKeyRole = "user_role"
 
 // JWTAuth returns a Gin middleware that validates Bearer JWT tokens.
-// The secret must be the same value used when signing tokens.
+// Accepts the token via Authorization header (preferred) or ?token= query param
+// (required for EventSource which cannot send custom headers).
 func JWTAuth(secret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		var tokenStr string
+
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization header format"})
+				return
+			}
+			tokenStr = parts[1]
+		} else if t := c.Query("token"); t != "" {
+			tokenStr = t
+		} else {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authorization header required"})
 			return
 		}
-
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization header format"})
-			return
-		}
-
-		tokenStr := parts[1]
 		claims := &Claims{}
 
 		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
