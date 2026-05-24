@@ -31,13 +31,13 @@ function StatCard({
 }
 
 const clusterStatusIcon = {
-  connected: <Wifi size={13} className="text-green-400" />,
+  healthy: <Wifi size={13} className="text-green-400" />,
   unreachable: <WifiOff size={13} className="text-red-400" />,
   degraded: <AlertTriangle size={13} className="text-yellow-400" />,
 }
 
 const clusterStatusColor = {
-  connected: 'text-green-400',
+  healthy: 'text-green-400',
   unreachable: 'text-red-400',
   degraded: 'text-yellow-400',
 }
@@ -107,7 +107,7 @@ export function Overview() {
     name: string
     display_name: string
     environment?: { name: string; color: string }
-    status: 'connected' | 'unreachable' | 'degraded'
+    status: 'healthy' | 'unreachable' | 'degraded'
     version: string
     last_seen_at: string
     counts: Record<string, number>
@@ -118,7 +118,7 @@ export function Overview() {
       id,
       name: info.name,
       display_name: info.name,
-      status: 'connected' as const,
+      status: 'healthy' as const,
       version: '',
       last_seen_at: '',
       counts: info.counts as Record<string, number>,

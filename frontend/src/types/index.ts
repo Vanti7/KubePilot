@@ -1,7 +1,7 @@
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info'
 export type FindingStatus = 'open' | 'planned' | 'ignored' | 'approved' | 'blocked' | 'resolved'
 export type UpdateType = 'patch' | 'minor' | 'major' | 'unknown'
-export type ClusterStatus = 'connected' | 'unreachable' | 'degraded'
+export type ClusterStatus = 'healthy' | 'unreachable' | 'degraded'
 
 export interface Environment {
   id: string

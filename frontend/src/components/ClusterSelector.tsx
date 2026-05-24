@@ -7,7 +7,7 @@ import { useClusterContext } from '../contexts/ClusterContext'
 import type { ClusterStatus } from '../types'
 
 const statusDot: Record<ClusterStatus, { icon: React.ReactNode; color: string }> = {
-  connected: { icon: <Wifi size={12} />, color: 'text-green-400' },
+  healthy: { icon: <Wifi size={12} />, color: 'text-green-400' },
   unreachable: { icon: <WifiOff size={12} />, color: 'text-red-400' },
   degraded: { icon: <AlertTriangle size={12} />, color: 'text-yellow-400' },
 }

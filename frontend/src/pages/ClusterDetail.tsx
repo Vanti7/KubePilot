@@ -9,13 +9,13 @@ import type { UpdateFinding } from '../types'
 import { formatAge, formatRelative, scoreToColor } from '../utils/formatting'
 
 const STATUS_ICON = {
-  connected: <Wifi size={14} className="text-green-400" />,
+  healthy: <Wifi size={14} className="text-green-400" />,
   unreachable: <WifiOff size={14} className="text-red-400" />,
   degraded: <AlertTriangle size={14} className="text-yellow-400" />,
 }
 
 const STATUS_COLOR = {
-  connected: 'text-green-400',
+  healthy: 'text-green-400',
   unreachable: 'text-red-400',
   degraded: 'text-yellow-400',
 }
