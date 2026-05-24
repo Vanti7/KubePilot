@@ -83,7 +83,7 @@ function WorkloadDetail({ workload }: { workload: Workload }) {
           <div className="space-y-1.5">
             {relevantFindings.map((f) => (
               <div key={f.id} className="flex items-center gap-2 text-xs p-2 rounded bg-surface-elevated">
-                <span className="font-mono text-slate-400">{f.current_version} → {f.available_version}</span>
+                <span className="font-mono text-slate-400">{f.current_version} → {f.latest_version}</span>
                 <span className={clsx('ml-auto font-mono font-semibold', f.risk_score?.score ? 'text-red-400' : '')}>
                   {f.risk_score?.score ?? ''}
                 </span>

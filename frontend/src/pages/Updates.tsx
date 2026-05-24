@@ -190,7 +190,7 @@ export function Updates() {
         <div className="flex items-center gap-1.5">
           <span className="font-mono text-xs text-slate-400">
             {f.current_version} <span className="text-slate-600">→</span>{' '}
-            <span className="text-green-400">{f.available_version}</span>
+            <span className="text-green-400">{f.latest_version}</span>
           </span>
           <span className={clsx('px-1 py-0.5 text-xs rounded font-medium', UPDATE_TYPE_STYLES[f.update_type])}>
             {updateTypeLabel(f.update_type)}

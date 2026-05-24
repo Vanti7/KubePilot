@@ -21,6 +21,14 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Fixed
+- `backend/internal/api/middleware/auth.go` — JWT accepte désormais `?token=` query param (requis pour SSE via EventSource qui ne peut pas envoyer de headers)
+- `frontend/src/types/index.ts` — `FindingSummary` : structure plate `{total,critical,high,...}` au lieu de `{by_severity:{...}}` inexistant dans le backend ; `OverviewData` : champs alignés sur la réponse réelle (`cluster_status`, `findings_summary`, `findings_per_cluster`, `top_findings`) ; `UpdateFinding.latest_version` au lieu de `available_version`
+- `frontend/src/api/client.ts` — `getClusters()` déballe `data.data` (backend enveloppe dans `{"data":[],"total":N}`)
+- `frontend/src/components/Sidebar.tsx` — accès `summary.critical` au lieu de `summary.by_severity.critical` (TypeError fatal)
+- `frontend/src/pages/Overview.tsx` — accès champs overview alignés avec le backend
+- `frontend/src/pages/Updates.tsx`, `ClusterDetail.tsx`, `Inventory.tsx`, `FindingDetail.tsx` — `latest_version` au lieu de `available_version`
+
 ---
 
 ## [0.1.0-alpha.2] — 2026-05-24

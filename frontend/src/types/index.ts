@@ -101,7 +101,7 @@ export interface UpdateFinding {
   target_id: string
   target_kind: string
   current_version: string
-  available_version: string
+  latest_version: string
   update_type: UpdateType
   is_breaking: boolean
   changelog_url: string

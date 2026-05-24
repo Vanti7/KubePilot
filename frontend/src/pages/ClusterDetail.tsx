@@ -61,7 +61,7 @@ export function ClusterDetail() {
       render: (f) => (
         <span className="font-mono text-xs text-slate-400">
           {f.current_version} <span className="text-slate-600">→</span>{' '}
-          <span className="text-green-400">{f.available_version}</span>
+          <span className="text-green-400">{f.latest_version}</span>
         </span>
       ),
     },

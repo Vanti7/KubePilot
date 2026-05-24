@@ -50,7 +50,7 @@ export function FindingDetail({ finding }: Props) {
 
   const isHelm = finding.target_kind === 'HelmRelease'
   const helmCommand = isHelm
-    ? `helm upgrade ${finding.workload_name} --version ${finding.available_version} -n ${finding.namespace_name}`
+    ? `helm upgrade ${finding.workload_name} --version ${finding.latest_version} -n ${finding.namespace_name}`
     : null
 
   return (
@@ -82,7 +82,7 @@ export function FindingDetail({ finding }: Props) {
         <div className="flex items-center gap-2 font-mono text-sm">
           <span className="text-slate-400">{finding.current_version}</span>
           <span className="text-slate-600">→</span>
-          <span className="text-green-400 font-semibold">{finding.available_version}</span>
+          <span className="text-green-400 font-semibold">{finding.latest_version}</span>
         </div>
       </div>
 
