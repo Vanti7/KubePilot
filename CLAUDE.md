@@ -79,7 +79,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ## État actuel du projet
 
-**Version courante** : `v0.1.0-alpha.1` (2026-05-09)
+**Version courante** : `v0.1.0-alpha.2` (2026-05-24)
 **Canal** : alpha
 **Branche principale** : `main`
 

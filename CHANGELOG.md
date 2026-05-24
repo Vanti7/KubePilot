@@ -21,6 +21,13 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+---
+
+## [0.1.0-alpha.2] — 2026-05-24
+
+> Corrections du scaffold initial : routing API, compilation TypeScript, pipeline CI/CD, déploiement Helm.
+> **Canal : alpha** — ne pas utiliser en production.
+
 ### Added
 - `Jenkinsfile` — pipeline CI/CD : build parallèle backend/frontend, push Harbor, mise à jour GitOps via `sed`
 - `VERSION` — fichier de version de base lu par Jenkins pour composer les tags semver (`v{VERSION}-alpha.{BUILD}`)
@@ -31,11 +38,11 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 - `frontend/Dockerfile` — `nginx.conf` copié dans `/etc/nginx/templates/` pour le traitement automatique par envsubst
 
 ### Fixed
-- `helm/kubepilot/templates/deployment.yaml` — ajout de `BACKEND_URL` en variable d'env du container frontend (injecté depuis le nom de service Helm)
 - `backend/internal/api/router.go` — routes auth déplacées sous `/api/v1` (elles étaient enregistrées à `/auth/*` alors que le frontend cible `/api/v1/auth/*`), corrige le 404 à la connexion
+- `helm/kubepilot/templates/deployment.yaml` — ajout de `BACKEND_URL` en variable d'env du container frontend (injecté depuis le nom de service Helm)
+- `helm/kubepilot/values.yaml` — ajout du champ `imagePullSecrets` pour Harbor (secret à créer manuellement dans chaque namespace)
 - Frontend TypeScript : suppression des imports `React` inutiles dans 9 fichiers (TS6133 — `react-jsx` transform gère l'injection automatique)
 - Frontend TypeScript : ajout de `src/vite-env.d.ts` (`/// <reference types="vite/client" />`) pour résoudre `import.meta.env` (TS2339)
-- `helm/kubepilot/values.yaml` — ajout du champ `imagePullSecrets` pour Harbor (secret à créer manuellement dans chaque namespace)
 
 ---
 
