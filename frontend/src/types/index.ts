@@ -124,21 +124,40 @@ export interface RiskScore {
 }
 
 export interface FindingSummary {
-  by_severity: Record<Severity, number>
-  by_cluster: Record<string, { name: string; counts: Record<Severity, number> }>
   total: number
+  critical: number
+  high: number
+  medium: number
+  low: number
+  info: number
+}
+
+export interface FindingsPerCluster {
+  cluster_id: string
+  cluster_name: string
+  open: number
+  critical: number
 }
 
 export interface OverviewData {
-  clusters: {
+  cluster_status: {
     total: number
-    connected: number
+    healthy: number
     degraded: number
     unreachable: number
+    unknown: number
   }
-  findings: FindingSummary
-  top_critical: UpdateFinding[]
-  data_freshness: Record<string, { last_seen: string; stale: boolean }>
+  findings_summary: FindingSummary
+  findings_per_cluster: FindingsPerCluster[]
+  top_findings: UpdateFinding[]
+  data_freshness: Array<{
+    cluster_id: string
+    cluster_name: string
+    last_seen_at: string | null
+    age_seconds: number
+    status: string
+  }>
+  generated_at: string
 }
 
 export interface PaginatedResponse<T> {

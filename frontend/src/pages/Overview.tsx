@@ -113,17 +113,15 @@ export function Overview() {
     counts: Record<string, number>
   }
 
-  const clusterRows: ClusterRow[] = Object.entries(data?.findings.by_cluster || {}).map(
-    ([id, info]) => ({
-      id,
-      name: info.name,
-      display_name: info.name,
-      status: 'healthy' as const,
-      version: '',
-      last_seen_at: '',
-      counts: info.counts as Record<string, number>,
-    })
-  )
+  const clusterRows: ClusterRow[] = (data?.findings_per_cluster || []).map((c) => ({
+    id: c.cluster_id,
+    name: c.cluster_name,
+    display_name: c.cluster_name,
+    status: 'healthy' as const,
+    version: '',
+    last_seen_at: '',
+    counts: { critical: c.critical, high: 0, medium: 0 },
+  }))
 
   const clusterColumns: Column<ClusterRow>[] = [
     {
@@ -206,22 +204,22 @@ export function Overview() {
       <div className="grid grid-cols-4 gap-3">
         <StatCard
           label="Total Clusters"
-          value={data?.clusters.total ?? '—'}
-          sublabel={`${data?.clusters.connected ?? 0} connected`}
+          value={data?.cluster_status.total ?? '—'}
+          sublabel={`${data?.cluster_status.healthy ?? 0} healthy`}
         />
         <StatCard
           label="Critical Findings"
-          value={data?.findings.by_severity.critical ?? '—'}
+          value={data?.findings_summary.critical ?? '—'}
           accent="text-severity-critical"
         />
         <StatCard
           label="High Findings"
-          value={data?.findings.by_severity.high ?? '—'}
+          value={data?.findings_summary.high ?? '—'}
           accent="text-severity-high"
         />
         <StatCard
           label="Total Open"
-          value={data?.findings.total ?? '—'}
+          value={data?.findings_summary.total ?? '—'}
           sublabel="open findings"
         />
       </div>
@@ -241,7 +239,7 @@ export function Overview() {
         </div>
         <DataTable
           columns={topCriticalColumns}
-          data={data?.top_critical ?? []}
+          data={data?.top_findings ?? []}
           loading={isLoading}
           rowKey={(f) => f.id}
           onRowClick={(f) => navigate(`/updates?finding=${f.id}`)}

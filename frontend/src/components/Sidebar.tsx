@@ -36,7 +36,7 @@ export function Sidebar() {
   const { data: summary } = useFindingSummary()
 
   const criticalHighCount = summary
-    ? (summary.by_severity.critical || 0) + (summary.by_severity.high || 0)
+    ? (summary.critical || 0) + (summary.high || 0)
     : 0
 
   const navItems: NavItem[] = [

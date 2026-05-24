@@ -58,8 +58,8 @@ export async function getMe(): Promise<User> {
 
 // Clusters
 export async function getClusters(): Promise<Cluster[]> {
-  const { data } = await api.get<Cluster[]>('/clusters')
-  return data
+  const { data } = await api.get<{ data: Cluster[]; total: number }>('/clusters')
+  return data.data
 }
 
 export async function getCluster(id: string): Promise<Cluster> {
