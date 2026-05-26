@@ -6,6 +6,7 @@ import {
   Boxes,
   Server,
   Package,
+  KeyRound,
   ShieldAlert,
   Calendar,
   Clock,
@@ -53,6 +54,7 @@ export function Sidebar() {
     { to: '/inventory', icon: <Boxes size={16} />, label: 'Workloads' },
     { to: '/nodes', icon: <Server size={16} />, label: 'Nodes' },
     { to: '/helm', icon: <Package size={16} />, label: 'Helm' },
+    { to: '/secrets', icon: <KeyRound size={16} />, label: 'Secrets' },
   ]
 
   const systemItems: NavItem[] = [

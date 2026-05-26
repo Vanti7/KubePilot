@@ -112,6 +112,10 @@ func NewRouter(
 		nodes.GET("/:id", nodeH.GetNode)
 	}
 
+	// Secrets.
+	secretH := handlers.NewSecretHandler(s, logger)
+	v1.GET("/secrets", secretH.ListSecrets)
+
 	// Overview.
 	overviewH := handlers.NewOverviewHandler(s, logger)
 	v1.GET("/overview", overviewH.GetOverview)

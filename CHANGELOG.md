@@ -21,6 +21,17 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Added
+- Gestion des Secrets Kubernetes — affichage des secrets avec namespace, type, noms de clés et timestamps K8s (valeurs jamais stockées)
+  - Modèle `Secret` GORM avec `k8s_created_at` et `k8s_updated_at` (timestamps natifs K8s)
+  - Migration SQL `002_secrets.sql` — table `secrets` avec contrainte unique `(cluster_id, namespace_name, name)`
+  - Migration SQL `003_secrets_timestamps.sql` — ajout `k8s_created_at` / `k8s_updated_at` pour envs ayant déjà appliqué 002
+  - Store `store/secrets.go` — `ListSecrets`, `UpsertSecret`, `DeleteSecretsNotSeenSince`
+  - Handler `GET /api/v1/secrets` avec filtres `cluster_id`, `namespace`, `type`
+  - Collecteur K8s — `collectSecrets` + `watchSecrets` ; `k8s_created_at` depuis `creationTimestamp`, `k8s_updated_at` depuis `max(managedFields[*].time)` ; secrets Helm exclus
+  - Page frontend `/secrets` — table avec colonnes Created/Modified colorées selon l'ancienneté (vert ≤30j, jaune ≤90j, orange ≤180j, rouge >180j)
+  - Lien "Secrets" dans la sidebar (icône `KeyRound`)
+
 ### Fixed
 - `backend/internal/api/middleware/auth.go` — JWT accepte désormais `?token=` query param (requis pour SSE via EventSource qui ne peut pas envoyer de headers)
 - `backend/internal/collector/kubernetes.go` — le collecteur utilise désormais `rest.InClusterConfig()` (SA token + CA cert montés par le pod) quand `KubeconfigRef` est vide et `TLSInsecure` est false ; la branche `APIEndpoint` sans CA cert causait `x509: certificate signed by unknown authority` pour le cluster enregistré en bootstrap

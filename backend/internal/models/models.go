@@ -86,6 +86,15 @@ const (
 	RoleViewer   = "viewer"
 )
 
+// Secret types
+const (
+	SecretTypeOpaque                  = "Opaque"
+	SecretTypeTLS                     = "kubernetes.io/tls"
+	SecretTypeDockerConfigJSON        = "kubernetes.io/dockerconfigjson"
+	SecretTypeServiceAccountToken     = "kubernetes.io/service-account-token"
+	SecretTypeBasicAuth               = "kubernetes.io/basic-auth"
+)
+
 // ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
@@ -232,6 +241,22 @@ type ImageTagObservation struct {
 	PublishedAt *time.Time `                                                      json:"published_at,omitempty"`
 	ObservedAt  time.Time  `gorm:"not null"                                       json:"observed_at"`
 	IsLatest    bool       `gorm:"default:false"                                  json:"is_latest"`
+}
+
+// Secret represents a Kubernetes Secret (metadata only — values are never stored).
+type Secret struct {
+	ID             uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	ClusterID      uuid.UUID      `gorm:"type:uuid;not null;index"                       json:"cluster_id"`
+	Cluster        *Cluster       `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
+	NamespaceName  string         `gorm:"not null;index"                                 json:"namespace_name"`
+	Name           string         `gorm:"not null"                                       json:"name"`
+	Type           string         `gorm:"not null;default:'Opaque'"                      json:"type"`
+	Keys           datatypes.JSON `gorm:"type:jsonb;default:'[]'"                        json:"keys"`
+	K8sCreatedAt   *time.Time     `                                                      json:"k8s_created_at,omitempty"`
+	K8sUpdatedAt   *time.Time     `                                                      json:"k8s_updated_at,omitempty"`
+	LastSeenAt     time.Time      `                                                      json:"last_seen_at"`
+	CreatedAt      time.Time      `                                                      json:"created_at"`
+	UpdatedAt      time.Time      `                                                      json:"updated_at"`
 }
 
 // HelmRelease represents a Helm release deployed in a cluster.
@@ -412,6 +437,7 @@ func AllModels() []interface{} {
 		&ContainerImage{},
 		&ImageRegistry{},
 		&ImageTagObservation{},
+		&Secret{},
 		&HelmRelease{},
 		&UpdateFinding{},
 		&RiskScore{},

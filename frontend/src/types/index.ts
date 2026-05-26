@@ -203,6 +203,27 @@ export interface NodeFilter {
   offset?: number
 }
 
+export interface Secret {
+  id: string
+  cluster_id: string
+  namespace_name: string
+  name: string
+  type: string
+  keys: string[]
+  k8s_created_at?: string
+  k8s_updated_at?: string
+  last_seen_at: string
+  cluster_name?: string
+}
+
+export interface SecretFilter {
+  cluster_id?: string
+  namespace?: string
+  type?: string
+  limit?: number
+  offset?: number
+}
+
 export interface HelmFilter {
   cluster_id?: string
   namespace_id?: string

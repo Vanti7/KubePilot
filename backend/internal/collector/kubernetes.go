@@ -124,12 +124,14 @@ func (kc *KubernetesCollector) collectAll(ctx context.Context) {
 	kc.collectNodes(ctx)
 	kc.collectWorkloads(ctx)
 	kc.collectHelmReleases(ctx)
+	kc.collectSecrets(ctx)
 
 	// Mark stale resources (not seen in last 10 minutes).
 	staleThreshold := time.Now().Add(-10 * time.Minute)
 	_ = kc.store.DeleteWorkloadsNotSeenSince(ctx, kc.clusterID, staleThreshold)
 	_ = kc.store.DeleteHelmReleasesNotSeenSince(ctx, kc.clusterID, staleThreshold)
 	_ = kc.store.DeleteNodesNotSeenSince(ctx, kc.clusterID, staleThreshold)
+	_ = kc.store.DeleteSecretsNotSeenSince(ctx, kc.clusterID, staleThreshold)
 
 	_ = kc.store.UpdateClusterStatus(ctx, kc.clusterID, models.ClusterStatusHealthy, time.Now())
 
@@ -356,6 +358,71 @@ func (kc *KubernetesCollector) collectHelmReleases(ctx context.Context) {
 	}
 }
 
+// collectSecrets lists all secrets (excluding Helm storage secrets) and upserts metadata.
+// Secret values are intentionally never read or stored.
+func (kc *KubernetesCollector) collectSecrets(ctx context.Context) {
+	list, err := kc.clientset.CoreV1().Secrets("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		kc.logger.Error("list secrets", zap.Error(err))
+		return
+	}
+
+	clusterUUID, _ := uuid.Parse(kc.clusterID)
+
+	for _, s := range list.Items {
+		s := s
+		model := secretFromK8s(clusterUUID, &s)
+		if model == nil {
+			continue
+		}
+		if err := kc.store.UpsertSecret(ctx, model); err != nil {
+			kc.logger.Error("upsert secret", zap.String("name", s.Name), zap.Error(err))
+		}
+	}
+
+	kc.wg.Add(1)
+	go func() {
+		defer kc.wg.Done()
+		kc.watchSecrets(ctx)
+	}()
+}
+
+func (kc *KubernetesCollector) watchSecrets(ctx context.Context) {
+	watcher, err := kc.clientset.CoreV1().Secrets("").Watch(ctx, metav1.ListOptions{})
+	if err != nil {
+		kc.logger.Error("watch secrets", zap.Error(err))
+		return
+	}
+	defer watcher.Stop()
+
+	clusterUUID, _ := uuid.Parse(kc.clusterID)
+
+	for {
+		select {
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return
+			}
+			secret, ok := event.Object.(*corev1.Secret)
+			if !ok {
+				continue
+			}
+			if event.Type == watch.Deleted {
+				continue
+			}
+			model := secretFromK8s(clusterUUID, secret)
+			if model == nil {
+				continue
+			}
+			_ = kc.store.UpsertSecret(ctx, model)
+		case <-kc.stopCh:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 // Stop signals the collector to shut down and waits for goroutines to finish.
 func (kc *KubernetesCollector) Stop() {
 	close(kc.stopCh)
@@ -516,6 +583,48 @@ func parseImage(workloadID uuid.UUID, containerName, imageRef string, isInit boo
 		Tag:             tag,
 		IsInitContainer: isInit,
 	}
+}
+
+// secretFromK8s builds a Secret model from a K8s secret.
+// Returns nil for Helm storage secrets (owner=helm) to avoid duplication.
+func secretFromK8s(clusterID uuid.UUID, s *corev1.Secret) *models.Secret {
+	if s.Labels["owner"] == "helm" {
+		return nil
+	}
+
+	keys := make([]string, 0, len(s.Data))
+	for k := range s.Data {
+		keys = append(keys, k)
+	}
+	keysJSON, _ := json.Marshal(keys)
+
+	k8sCreated := s.CreationTimestamp.Time
+	k8sUpdated := lastManagedFieldTime(s.ManagedFields)
+
+	return &models.Secret{
+		ID:            uuid.New(),
+		ClusterID:     clusterID,
+		NamespaceName: s.Namespace,
+		Name:          s.Name,
+		Type:          string(s.Type),
+		Keys:          datatypes.JSON(keysJSON),
+		K8sCreatedAt:  &k8sCreated,
+		K8sUpdatedAt:  k8sUpdated,
+	}
+}
+
+// lastManagedFieldTime returns the most recent time across all managedFields entries, or nil.
+func lastManagedFieldTime(fields []metav1.ManagedFieldsEntry) *time.Time {
+	var latest time.Time
+	for _, mf := range fields {
+		if mf.Time != nil && mf.Time.Time.After(latest) {
+			latest = mf.Time.Time
+		}
+	}
+	if latest.IsZero() {
+		return nil
+	}
+	return &latest
 }
 
 // helmRelease is the minimal Helm release structure we decode from secrets.

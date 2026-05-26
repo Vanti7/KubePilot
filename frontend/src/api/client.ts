@@ -14,6 +14,8 @@ import type {
   WorkloadFilter,
   NodeFilter,
   HelmFilter,
+  SecretFilter,
+  Secret,
   FindingStatus,
   LoginResponse,
   User,
@@ -149,6 +151,12 @@ export async function updateFindingStatus(
 
 export async function getFindingSummary(): Promise<FindingSummary> {
   const { data } = await api.get<FindingSummary>('/findings/summary')
+  return data
+}
+
+// Secrets
+export async function getSecrets(filter?: SecretFilter): Promise<PaginatedResponse<Secret>> {
+  const { data } = await api.get<PaginatedResponse<Secret>>('/secrets', { params: filter })
   return data
 }
 
