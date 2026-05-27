@@ -112,9 +112,23 @@ func NewRouter(
 		nodes.GET("/:id", nodeH.GetNode)
 	}
 
+	// Namespaces.
+	nsH := handlers.NewNamespaceHandler(s, logger)
+	v1.GET("/namespaces", nsH.ListNamespaces)
+
 	// Secrets.
 	secretH := handlers.NewSecretHandler(s, logger)
 	v1.GET("/secrets", secretH.ListSecrets)
+
+	// Integrations.
+	integrationH := handlers.NewIntegrationHandler(s, logger)
+	integrations := v1.Group("/integrations")
+	{
+		integrations.GET("", integrationH.ListIntegrations)
+		integrations.POST("", middleware.RequireRole("operator"), integrationH.CreateIntegration)
+		integrations.POST("/:id/test", middleware.RequireRole("operator"), integrationH.TestIntegration)
+		integrations.DELETE("/:id", middleware.RequireRole("admin"), integrationH.DeleteIntegration)
+	}
 
 	// Overview.
 	overviewH := handlers.NewOverviewHandler(s, logger)

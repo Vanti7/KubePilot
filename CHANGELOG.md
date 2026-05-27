@@ -22,6 +22,11 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 ### Added
+- Endpoint `GET /api/v1/namespaces` — listing des namespaces avec filtre `cluster_id` (manquait dans le router, causait des 404 sur les pages Inventory et Secrets)
+- Endpoints `GET/POST/DELETE /api/v1/integrations` + `POST /api/v1/integrations/:id/test` — CRUD complet des comptes d'intégration (manquaient dans le router, causaient des 404 + crash page Integrations)
+- Migration `004_finding_unique_constraint.sql` — index uniques `(cluster_id, container_image_id)` et `(cluster_id, helm_release_id)` sur `update_findings`
+
+### Added (précédent)
 - Gestion des Secrets Kubernetes — affichage des secrets avec namespace, type, noms de clés et timestamps K8s (valeurs jamais stockées)
   - Modèle `Secret` GORM avec `k8s_created_at` et `k8s_updated_at` (timestamps natifs K8s)
   - Migration SQL `002_secrets.sql` — table `secrets` avec contrainte unique `(cluster_id, namespace_name, name)`
@@ -31,6 +36,10 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
   - Collecteur K8s — `collectSecrets` + `watchSecrets` ; `k8s_created_at` depuis `creationTimestamp`, `k8s_updated_at` depuis `max(managedFields[*].time)` ; secrets Helm exclus
   - Page frontend `/secrets` — table avec colonnes Created/Modified colorées selon l'ancienneté (vert ≤30j, jaune ≤90j, orange ≤180j, rouge >180j)
   - Lien "Secrets" dans la sidebar (icône `KeyRound`)
+
+### Fixed
+- **Bug critique** : `UpsertFinding` utilisait `ON CONFLICT (cluster_id, kind, current_version)` sans contrainte UNIQUE correspondante dans la BDD → PostgreSQL rejetait silencieusement tous les inserts, aucun finding n'était jamais créé. Corrigé : les clés de conflict sont maintenant `(cluster_id, container_image_id)` pour les findings image et `(cluster_id, helm_release_id)` pour les findings Helm
+- Node handler : `capacity` et `allocatable` sont maintenant sérialisés en objets `{cpu, memory}` au lieu de champs plats — corrige le crash `TypeError: Cannot convert undefined or null to object` dans le slide-over des nœuds
 
 ### Fixed
 - `backend/internal/api/middleware/auth.go` — JWT accepte désormais `?token=` query param (requis pour SSE via EventSource qui ne peut pas envoyer de headers)

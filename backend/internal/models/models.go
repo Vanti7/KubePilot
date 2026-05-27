@@ -282,14 +282,18 @@ type HelmRelease struct {
 // UpdateFinding represents a detected update opportunity or security finding.
 type UpdateFinding struct {
 	ID                uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	ClusterID         uuid.UUID      `gorm:"type:uuid;not null;index"                       json:"cluster_id"`
+	// ClusterID participates in two composite unique indexes:
+	//   uq_finding_by_image  (cluster_id, container_image_id) — one finding per container image per cluster
+	//   uq_finding_by_helm   (cluster_id, helm_release_id)    — one finding per Helm release per cluster
+	// PostgreSQL NULL semantics (NULL != NULL) allow multiple findings with null container_image_id or null helm_release_id.
+	ClusterID         uuid.UUID      `gorm:"type:uuid;not null;index;uniqueIndex:uq_finding_by_image,priority:1;uniqueIndex:uq_finding_by_helm,priority:1" json:"cluster_id"`
 	Cluster           *Cluster       `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
 	NamespaceName     string         `gorm:"index"                                          json:"namespace_name,omitempty"`
 	WorkloadID        *uuid.UUID     `gorm:"type:uuid;index"                                json:"workload_id,omitempty"`
 	Workload          *Workload      `gorm:"foreignKey:WorkloadID"                          json:"workload,omitempty"`
-	HelmReleaseID     *uuid.UUID     `gorm:"type:uuid;index"                                json:"helm_release_id,omitempty"`
+	HelmReleaseID     *uuid.UUID     `gorm:"type:uuid;uniqueIndex:uq_finding_by_helm,priority:2" json:"helm_release_id,omitempty"`
 	HelmRelease       *HelmRelease   `gorm:"foreignKey:HelmReleaseID"                       json:"helm_release,omitempty"`
-	ContainerImageID  *uuid.UUID     `gorm:"type:uuid;index"                                json:"container_image_id,omitempty"`
+	ContainerImageID  *uuid.UUID     `gorm:"type:uuid;uniqueIndex:uq_finding_by_image,priority:2" json:"container_image_id,omitempty"`
 	ContainerImage    *ContainerImage `gorm:"foreignKey:ContainerImageID"                   json:"container_image,omitempty"`
 	Kind              string         `gorm:"not null;index"                                 json:"kind"`
 	UpdateType        string         `gorm:"not null"                                       json:"update_type"`

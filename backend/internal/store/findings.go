@@ -149,7 +149,13 @@ func (s *Store) GetFinding(ctx context.Context, id string) (*models.UpdateFindin
 }
 
 // UpsertFinding inserts or updates a finding.
-// The uniqueness key is (cluster_id, kind, current_version, workload_id OR helm_release_id).
+//
+// Conflict keys (backed by unique indexes in the DB):
+//   - image findings: (cluster_id, container_image_id)
+//   - helm findings:  (cluster_id, helm_release_id)
+//
+// PostgreSQL NULL semantics ensure NULL container_image_id or helm_release_id never
+// collide, so image and Helm findings coexist without interference.
 func (s *Store) UpsertFinding(ctx context.Context, finding *models.UpdateFinding) error {
 	if finding.ID == uuid.Nil {
 		finding.ID = uuid.New()
@@ -159,26 +165,41 @@ func (s *Store) UpsertFinding(ctx context.Context, finding *models.UpdateFinding
 	}
 	finding.LastObservedAt = time.Now()
 
-	return s.DB.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns: []clause.Column{
-				{Name: "cluster_id"},
-				{Name: "kind"},
-				{Name: "current_version"},
-			},
-			DoUpdates: clause.AssignmentColumns([]string{
-				"latest_version",
-				"title",
-				"description",
-				"update_type",
-				"severity",
-				"last_observed_at",
-				"cves",
-				"metadata",
-				"updated_at",
-			}),
-		}).
-		Create(finding).Error
+	doUpdates := clause.AssignmentColumns([]string{
+		"latest_version",
+		"title",
+		"description",
+		"update_type",
+		"severity",
+		"last_observed_at",
+		"cves",
+		"metadata",
+		"updated_at",
+	})
+
+	switch finding.Kind {
+	case models.FindingKindImage:
+		if finding.ContainerImageID != nil {
+			return s.DB.WithContext(ctx).
+				Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "cluster_id"}, {Name: "container_image_id"}},
+					DoUpdates: doUpdates,
+				}).
+				Create(finding).Error
+		}
+	case models.FindingKindHelm:
+		if finding.HelmReleaseID != nil {
+			return s.DB.WithContext(ctx).
+				Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "cluster_id"}, {Name: "helm_release_id"}},
+					DoUpdates: doUpdates,
+				}).
+				Create(finding).Error
+		}
+	}
+
+	// Fallback for unknown kind or missing FK — plain insert.
+	return s.DB.WithContext(ctx).Create(finding).Error
 }
 
 // UpdateFindingStatus changes the status of a finding and records who changed it.
