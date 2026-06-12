@@ -21,6 +21,9 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Changed
+- **Bruit de logs du watcher d'images** : les erreurs attendues/environnementales (TLS self-signed `x509`, `401`/`403` d'auth registry, hôte injoignable, références orphelines `record not found`) sont désormais loggées en `debug` au lieu de `warn` — elles inondaient les logs à chaque cycle. Les erreurs réellement inattendues restent en `warn`
+
 ### Fixed
 - **Filtre namespace des workloads inopérant** : le frontend envoyait `namespace_id` (UUID) mais `GET /api/v1/workloads` ne lisait que `namespace` (nom) → le filtre était ignoré. Le handler accepte désormais `namespace_id`, résolu côté store en `(cluster_id, namespace_name)` via sous-requête (les workloads ne stockent que le nom du namespace), scopé par cluster pour éviter les collisions de noms inter-clusters
 - **Connexion SSH instable** : le `ssh.Client` était créé une seule fois ; dès que le tunnel tombait (blip réseau, coupure des connexions longues par un firewall), **tous** les appels K8s (watch + list) échouaient en boucle sans jamais se rétablir. Remplacé par un `sshTunnel` auto-réparant — keepalive `keepalive@openssh.com` toutes les 20 s pour éviter la coupure sur inactivité, et reconnexion automatique au prochain `Dial` quand la connexion est morte

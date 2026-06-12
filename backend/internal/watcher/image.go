@@ -74,12 +74,55 @@ func (iw *ImageWatcher) check(ctx context.Context) {
 	for _, img := range images {
 		img := img
 		if err := iw.CheckImage(ctx, &img); err != nil {
-			iw.logger.Warn("image watcher: check image",
-				zap.String("image", img.Image),
-				zap.Error(err),
-			)
+			// Private/auth-gated registries (self-signed TLS, 401/403), unreachable
+			// hosts and orphaned references are expected in many environments and
+			// would otherwise flood the logs every cycle — keep them at debug.
+			if isExpectedImageError(err) {
+				iw.logger.Debug("image watcher: skipped image",
+					zap.String("image", img.Image),
+					zap.Error(err),
+				)
+			} else {
+				iw.logger.Warn("image watcher: check image",
+					zap.String("image", img.Image),
+					zap.Error(err),
+				)
+			}
 		}
 	}
+}
+
+// isExpectedImageError reports whether err is an environmental/expected failure
+// (registry auth, TLS trust, unreachable host, orphaned workload) rather than a
+// genuine bug worth a warning.
+func isExpectedImageError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, s := range []string{
+		"certificate signed by unknown authority",
+		"failed to verify certificate",
+		"x509:",
+		"registry returned 401",
+		"registry returned 403",
+		"unauthorized",
+		"authentication required",
+		"\"code\":\"denied\"",
+		"forbidden",
+		"record not found",
+		"connection refused",
+		"no such host",
+		"i/o timeout",
+		"deadline exceeded",
+		"connectex:", // windows connect failure
+		"wsarecv",     // windows connection aborted
+	} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // CheckImage fetches available tags for the image from its registry and creates
