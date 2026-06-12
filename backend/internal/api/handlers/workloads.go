@@ -26,6 +26,7 @@ func NewWorkloadHandler(s *store.Store, logger *zap.Logger) *WorkloadHandler {
 func (h *WorkloadHandler) ListWorkloads(c *gin.Context) {
 	filter := store.WorkloadFilter{
 		ClusterID:     c.Query("cluster_id"),
+		NamespaceID:   c.Query("namespace_id"),
 		NamespaceName: c.Query("namespace"),
 		Kind:          c.Query("kind"),
 		HealthStatus:  c.Query("health_status"),

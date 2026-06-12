@@ -12,6 +12,7 @@ import (
 // WorkloadFilter holds optional filters for listing workloads.
 type WorkloadFilter struct {
 	ClusterID     string
+	NamespaceID   string // resolved to (cluster_id, namespace_name) — workloads only store the name
 	NamespaceName string
 	Kind          string
 	HealthStatus  string
@@ -35,6 +36,15 @@ func (s *Store) ListWorkloads(ctx context.Context, filter WorkloadFilter) ([]mod
 
 	if filter.ClusterID != "" {
 		q = q.Where("cluster_id = ?", filter.ClusterID)
+	}
+	if filter.NamespaceID != "" {
+		// Workloads store namespace_name, not namespace_id; resolve via the
+		// namespaces table and scope by cluster to avoid matching same-named
+		// namespaces in other clusters.
+		q = q.Where(
+			"cluster_id = (SELECT cluster_id FROM namespaces WHERE id = ?) AND namespace_name = (SELECT name FROM namespaces WHERE id = ?)",
+			filter.NamespaceID, filter.NamespaceID,
+		)
 	}
 	if filter.NamespaceName != "" {
 		q = q.Where("namespace_name = ?", filter.NamespaceName)
