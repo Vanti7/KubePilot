@@ -14,15 +14,23 @@ import (
 	"gorm.io/gorm"
 )
 
+// ClusterSyncer triggers an immediate collection pass for a cluster.
+// Implemented by collector.CollectorManager; kept as an interface here to avoid
+// a hard dependency from the API layer on the collector package.
+type ClusterSyncer interface {
+	TriggerSync(clusterID string) bool
+}
+
 // ClusterHandler handles cluster CRUD endpoints.
 type ClusterHandler struct {
 	store  *store.Store
+	syncer ClusterSyncer
 	logger *zap.Logger
 }
 
 // NewClusterHandler creates a new ClusterHandler.
-func NewClusterHandler(s *store.Store, logger *zap.Logger) *ClusterHandler {
-	return &ClusterHandler{store: s, logger: logger}
+func NewClusterHandler(s *store.Store, syncer ClusterSyncer, logger *zap.Logger) *ClusterHandler {
+	return &ClusterHandler{store: s, syncer: syncer, logger: logger}
 }
 
 // ListClusters returns all clusters.
@@ -62,6 +70,15 @@ type createClusterRequest struct {
 	APIEndpoint   string     `json:"api_endpoint"`
 	KubeconfigRef string     `json:"kubeconfig_ref"`
 	TLSInsecure   bool       `json:"tls_insecure"`
+
+	// Connection mode and SSH parameters.
+	ConnectionMode    string `json:"connection_mode"`
+	SSHHost           string `json:"ssh_host"`
+	SSHPort           int    `json:"ssh_port"`
+	SSHUser           string `json:"ssh_user"`
+	SSHPassword       string `json:"ssh_password"`
+	SSHKubeconfigPath string `json:"ssh_kubeconfig_path"`
+	SSHSudo           bool   `json:"ssh_sudo"`
 }
 
 // CreateCluster registers a new cluster.
@@ -71,6 +88,21 @@ func (h *ClusterHandler) CreateCluster(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	mode := req.ConnectionMode
+	if mode == "" {
+		mode = models.ClusterConnKubeconfig
+	}
+
+	if mode == models.ClusterConnSSH {
+		if req.SSHHost == "" || req.SSHUser == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "ssh_host and ssh_user are required for ssh connection mode"})
+			return
+		}
+		if req.SSHPort == 0 {
+			req.SSHPort = 22
+		}
 	}
 
 	cluster := models.Cluster{
@@ -84,6 +116,14 @@ func (h *ClusterHandler) CreateCluster(c *gin.Context) {
 		KubeconfigRef: req.KubeconfigRef,
 		TLSInsecure:   req.TLSInsecure,
 		Status:        models.ClusterStatusUnknown,
+
+		ConnectionMode:    mode,
+		SSHHost:           req.SSHHost,
+		SSHPort:           req.SSHPort,
+		SSHUser:           req.SSHUser,
+		SSHPassword:       req.SSHPassword,
+		SSHKubeconfigPath: req.SSHKubeconfigPath,
+		SSHSudo:           req.SSHSudo,
 	}
 
 	if err := h.store.CreateCluster(c.Request.Context(), &cluster); err != nil {
@@ -103,6 +143,14 @@ type updateClusterRequest struct {
 	APIEndpoint   string     `json:"api_endpoint"`
 	KubeconfigRef string     `json:"kubeconfig_ref"`
 	TLSInsecure   *bool      `json:"tls_insecure"`
+
+	ConnectionMode    string `json:"connection_mode"`
+	SSHHost           string `json:"ssh_host"`
+	SSHPort           int    `json:"ssh_port"`
+	SSHUser           string `json:"ssh_user"`
+	SSHPassword       string `json:"ssh_password"`
+	SSHKubeconfigPath string `json:"ssh_kubeconfig_path"`
+	SSHSudo           *bool  `json:"ssh_sudo"`
 }
 
 // UpdateCluster updates cluster metadata.
@@ -146,6 +194,27 @@ func (h *ClusterHandler) UpdateCluster(c *gin.Context) {
 	}
 	if req.TLSInsecure != nil {
 		cluster.TLSInsecure = *req.TLSInsecure
+	}
+	if req.ConnectionMode != "" {
+		cluster.ConnectionMode = req.ConnectionMode
+	}
+	if req.SSHHost != "" {
+		cluster.SSHHost = req.SSHHost
+	}
+	if req.SSHPort != 0 {
+		cluster.SSHPort = req.SSHPort
+	}
+	if req.SSHUser != "" {
+		cluster.SSHUser = req.SSHUser
+	}
+	if req.SSHPassword != "" {
+		cluster.SSHPassword = req.SSHPassword
+	}
+	if req.SSHKubeconfigPath != "" {
+		cluster.SSHKubeconfigPath = req.SSHKubeconfigPath
+	}
+	if req.SSHSudo != nil {
+		cluster.SSHSudo = *req.SSHSudo
 	}
 
 	if err := h.store.UpdateCluster(c.Request.Context(), cluster); err != nil {
@@ -199,8 +268,14 @@ func (h *ClusterHandler) SyncCluster(c *gin.Context) {
 		return
 	}
 
-	h.logger.Info("cluster sync triggered", zap.String("id", id))
-	c.JSON(http.StatusAccepted, gin.H{"message": "sync triggered", "cluster_id": id})
+	// Kick off an immediate collection pass if a collector is active for this cluster.
+	triggered := false
+	if h.syncer != nil {
+		triggered = h.syncer.TriggerSync(id)
+	}
+
+	h.logger.Info("cluster sync triggered", zap.String("id", id), zap.Bool("collector_active", triggered))
+	c.JSON(http.StatusAccepted, gin.H{"message": "sync triggered", "cluster_id": id, "collector_active": triggered})
 }
 
 // slugify converts a display name to a URL-safe slug.

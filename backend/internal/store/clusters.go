@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kubepilot/backend/internal/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ListClusters returns all clusters with their environments preloaded.
@@ -100,15 +101,25 @@ func (s *Store) UpsertNamespace(ctx context.Context, ns *models.Namespace) error
 		FirstOrCreate(ns).Error
 }
 
-// UpsertNode inserts or updates a node record identified by cluster+name.
+// UpsertNode inserts or updates a node record identified by (cluster_id, name).
+// Uses ON CONFLICT against the uq_node unique index so the existing row's primary
+// key is preserved on update (a plain FirstOrCreate duplicated rows because the
+// freshly-generated ID poisoned the lookup condition).
 func (s *Store) UpsertNode(ctx context.Context, node *models.Node) error {
 	if node.ID == uuid.Nil {
 		node.ID = uuid.New()
 	}
 	return s.DB.WithContext(ctx).
-		Where(models.Node{ClusterID: node.ClusterID, Name: node.Name}).
-		Assign(node).
-		FirstOrCreate(node).Error
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "cluster_id"}, {Name: "name"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"role", "status", "k8s_version", "os_image", "kernel_version",
+				"container_runtime", "arch", "capacity_cpu", "capacity_memory",
+				"allocatable_cpu", "allocatable_memory", "labels", "taints",
+				"conditions", "updated_at",
+			}),
+		}).
+		Create(node).Error
 }
 
 // ListNodes returns nodes for a given cluster.

@@ -15,6 +15,7 @@ func NewRouter(
 	cfg *config.Config,
 	s *store.Store,
 	bus *handlers.EventBus,
+	syncer handlers.ClusterSyncer,
 	logger *zap.Logger,
 ) *gin.Engine {
 	router := gin.New()
@@ -67,7 +68,7 @@ func NewRouter(
 	v1.Use(middleware.JWTAuth(cfg.JWTSecret))
 
 	// Clusters.
-	clusterH := handlers.NewClusterHandler(s, logger)
+	clusterH := handlers.NewClusterHandler(s, syncer, logger)
 	clusters := v1.Group("/clusters")
 	{
 		clusters.GET("", clusterH.ListClusters)

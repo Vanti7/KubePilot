@@ -102,6 +102,10 @@ func (iw *ImageWatcher) CheckImage(ctx context.Context, image *models.ContainerI
 	// Determine whether a newer version exists.
 	newerTag, updateType := findNewerTag(image.Tag, cachedTags)
 	if newerTag == "" {
+		// No update available — resolve any finding that was previously open for this image.
+		if err := iw.store.ResolveActiveFindingForImage(ctx, image.ID); err != nil {
+			iw.logger.Warn("resolve image finding", zap.String("image", image.Image), zap.Error(err))
+		}
 		return nil
 	}
 
@@ -244,9 +248,9 @@ func (iw *ImageWatcher) getDockerHubToken(ctx context.Context, repository string
 	return result.Token, nil
 }
 
-// getCachedTags returns cached tag list from Redis, or nil if not found.
+// getCachedTags returns cached tag list from the cache, or nil if not found.
 func (iw *ImageWatcher) getCachedTags(ctx context.Context, key string) ([]string, error) {
-	val, err := iw.store.Redis.Get(ctx, key).Result()
+	val, err := iw.store.Cache.Get(ctx, key)
 	if err != nil {
 		return nil, nil // Cache miss is not an error.
 	}
@@ -257,13 +261,13 @@ func (iw *ImageWatcher) getCachedTags(ctx context.Context, key string) ([]string
 	return tags, nil
 }
 
-// cacheTags stores a tag list in Redis with the default TTL.
+// cacheTags stores a tag list in the cache with the default TTL.
 func (iw *ImageWatcher) cacheTags(ctx context.Context, key string, tags []string) {
 	data, err := json.Marshal(tags)
 	if err != nil {
 		return
 	}
-	iw.store.Redis.Set(ctx, key, data, imageTagCacheTTL)
+	_ = iw.store.Cache.Set(ctx, key, data, imageTagCacheTTL)
 }
 
 // findNewerTag compares the current tag against the available list and returns

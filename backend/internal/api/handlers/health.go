@@ -52,16 +52,16 @@ func (h *HealthHandler) Connectors(c *gin.Context) {
 		dbErr = err.Error()
 	}
 
-	redisOK := true
-	redisErr := ""
-	if err := h.store.Redis.Ping(ctx).Err(); err != nil {
-		redisOK = false
-		redisErr = err.Error()
+	cacheOK := true
+	cacheErr := ""
+	if err := h.store.Cache.Ping(ctx); err != nil {
+		cacheOK = false
+		cacheErr = err.Error()
 	}
 
 	overall := "ok"
 	statusCode := http.StatusOK
-	if !dbOK || !redisOK {
+	if !dbOK || !cacheOK {
 		overall = "degraded"
 		statusCode = http.StatusServiceUnavailable
 	}
@@ -69,8 +69,8 @@ func (h *HealthHandler) Connectors(c *gin.Context) {
 	c.JSON(statusCode, gin.H{
 		"status": overall,
 		"connectors": gin.H{
-			"postgres": gin.H{"ok": dbOK, "error": dbErr},
-			"redis":    gin.H{"ok": redisOK, "error": redisErr},
+			"database": gin.H{"ok": dbOK, "error": dbErr},
+			"cache":    gin.H{"ok": cacheOK, "error": cacheErr},
 		},
 	})
 }

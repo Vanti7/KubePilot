@@ -5,6 +5,7 @@ package bootstrap
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // Run executes all bootstrap tasks.
@@ -27,10 +29,20 @@ func Run(ctx context.Context, db *gorm.DB, cfg *config.Config, logger *zap.Logge
 	if err := ensureAdminUser(ctx, db, cfg, logger); err != nil {
 		return fmt.Errorf("ensure admin user: %w", err)
 	}
-	if cfg.InCluster {
+	switch {
+	case cfg.InCluster:
 		if err := ensureLocalCluster(ctx, db, cfg, logger); err != nil {
 			// Non-fatal: log and continue.
 			logger.Warn("could not auto-register local cluster", zap.Error(err))
+		}
+	case cfg.LocalMode && cfg.SSHHost != "":
+		if err := ensureLocalClusterViaSSH(ctx, db, cfg, logger); err != nil {
+			logger.Warn("could not auto-register local cluster via ssh", zap.Error(err))
+		}
+	case cfg.LocalMode:
+		if err := ensureLocalClusterFromKubeconfig(ctx, db, cfg, logger); err != nil {
+			// Non-fatal: the user can still register a cluster via the API/UI.
+			logger.Warn("could not auto-register local cluster from kubeconfig", zap.Error(err))
 		}
 	}
 	return nil
@@ -160,6 +172,122 @@ func ensureLocalCluster(ctx context.Context, db *gorm.DB, cfg *config.Config, lo
 	logger.Info("local cluster auto-registered",
 		zap.String("name", cfg.ClusterName),
 		zap.String("endpoint", restCfg.Host),
+	)
+	return nil
+}
+
+// ensureLocalClusterFromKubeconfig auto-registers the cluster pointed at by the
+// user's kubeconfig (single-binary / local mode). The merged kubeconfig is stored
+// base64-encoded in KubeconfigRef so the collector can connect with it directly.
+func ensureLocalClusterFromKubeconfig(ctx context.Context, db *gorm.DB, cfg *config.Config, logger *zap.Logger) error {
+	var count int64
+	db.WithContext(ctx).Model(&models.Cluster{}).
+		Where("name = ?", cfg.ClusterName).
+		Count(&count)
+	if count > 0 {
+		logger.Info("local cluster already registered", zap.String("name", cfg.ClusterName))
+		return nil
+	}
+
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if cfg.KubeconfigPath != "" {
+		loadingRules.ExplicitPath = cfg.KubeconfigPath
+	}
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, &clientcmd.ConfigOverrides{})
+
+	restCfg, err := clientConfig.ClientConfig()
+	if err != nil {
+		return fmt.Errorf("load kubeconfig rest config: %w", err)
+	}
+
+	rawCfg, err := clientConfig.RawConfig()
+	if err != nil {
+		return fmt.Errorf("load raw kubeconfig: %w", err)
+	}
+	encoded, err := clientcmd.Write(rawCfg)
+	if err != nil {
+		return fmt.Errorf("serialize kubeconfig: %w", err)
+	}
+
+	// Find the "prod" environment or the first available one.
+	var env models.Environment
+	if err := db.WithContext(ctx).Where("slug = ?", "prod").First(&env).Error; err != nil {
+		if err := db.WithContext(ctx).First(&env).Error; err != nil {
+			return fmt.Errorf("find environment: %w", err)
+		}
+	}
+
+	envID := env.ID
+	cluster := models.Cluster{
+		ID:            uuid.New(),
+		EnvironmentID: &envID,
+		Name:          cfg.ClusterName,
+		Slug:          cfg.ClusterName,
+		APIEndpoint:   restCfg.Host,
+		KubeconfigRef: base64.StdEncoding.EncodeToString(encoded),
+		Status:        models.ClusterStatusUnknown,
+	}
+
+	if err := db.WithContext(ctx).Create(&cluster).Error; err != nil {
+		return fmt.Errorf("create local cluster record: %w", err)
+	}
+
+	logger.Info("local cluster auto-registered from kubeconfig",
+		zap.String("name", cfg.ClusterName),
+		zap.String("endpoint", restCfg.Host),
+	)
+	return nil
+}
+
+// ensureLocalClusterViaSSH registers a cluster reachable over SSH (local mode).
+// The collector will SSH to the node, read its kubeconfig and tunnel API traffic.
+func ensureLocalClusterViaSSH(ctx context.Context, db *gorm.DB, cfg *config.Config, logger *zap.Logger) error {
+	var count int64
+	db.WithContext(ctx).Model(&models.Cluster{}).
+		Where("name = ?", cfg.ClusterName).
+		Count(&count)
+	if count > 0 {
+		logger.Info("local cluster already registered", zap.String("name", cfg.ClusterName))
+		return nil
+	}
+
+	// Find the "prod" environment or the first available one.
+	var env models.Environment
+	if err := db.WithContext(ctx).Where("slug = ?", "prod").First(&env).Error; err != nil {
+		if err := db.WithContext(ctx).First(&env).Error; err != nil {
+			return fmt.Errorf("find environment: %w", err)
+		}
+	}
+
+	port := cfg.SSHPort
+	if port == 0 {
+		port = 22
+	}
+
+	envID := env.ID
+	cluster := models.Cluster{
+		ID:                uuid.New(),
+		EnvironmentID:     &envID,
+		Name:              cfg.ClusterName,
+		Slug:              cfg.ClusterName,
+		Status:            models.ClusterStatusUnknown,
+		ConnectionMode:    models.ClusterConnSSH,
+		SSHHost:           cfg.SSHHost,
+		SSHPort:           port,
+		SSHUser:           cfg.SSHUser,
+		SSHPassword:       cfg.SSHPassword,
+		SSHKubeconfigPath: cfg.SSHKubeconfigPath,
+		SSHSudo:           cfg.SSHSudo,
+	}
+
+	if err := db.WithContext(ctx).Create(&cluster).Error; err != nil {
+		return fmt.Errorf("create ssh cluster record: %w", err)
+	}
+
+	logger.Info("local cluster auto-registered via ssh",
+		zap.String("name", cfg.ClusterName),
+		zap.String("ssh_host", cfg.SSHHost),
+		zap.Int("ssh_port", port),
 	)
 	return nil
 }

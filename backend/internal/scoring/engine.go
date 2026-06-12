@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +13,12 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/datatypes"
 )
+
+// maxPossibleSum is the maximum weighted factor sum before multipliers
+// (all factors at their maximum). The final score normalizes the weighted
+// sum × multipliers against this constant to a 0–100 scale.
+// See docs/scoring.md §7 — the maximum after multipliers is 18.0 × 1.2 = 21.6.
+const maxPossibleSum = 21.6
 
 // ScoringEngine computes risk scores for UpdateFindings.
 type ScoringEngine struct {
@@ -83,17 +90,17 @@ func (se *ScoringEngine) ScoreFinding(
 		}
 		switch annotations["kubepilot/criticality"] {
 		case "critical":
-			factors.ServiceCriticality = 20
-		case "high":
 			factors.ServiceCriticality = 15
-		case "medium":
+		case "high":
 			factors.ServiceCriticality = 10
+		case "medium":
+			factors.ServiceCriticality = 5
 		case "low":
-			factors.ServiceCriticality = 3
+			factors.ServiceCriticality = 2
 		default:
 			// Heuristic: many replicas → higher criticality.
 			if workload.ReplicasDesired >= 3 {
-				factors.ServiceCriticality = 15
+				factors.ServiceCriticality = 10
 			}
 		}
 	}
@@ -174,13 +181,16 @@ func (se *ScoringEngine) ScoreFinding(
 	factors.ExposureMultiplier = exposureMultiplier
 
 	// --- Final score ---
-	score := weighted * envMultiplier * exposureMultiplier
+	// Normalize the weighted sum (× multipliers) to a 0–100 scale (docs/scoring.md §7).
+	preNorm := weighted * envMultiplier * exposureMultiplier
+	score := preNorm / maxPossibleSum * 100
 	if score > 100 {
 		score = 100
 	}
 	if score < 0 {
 		score = 0
 	}
+	score = math.Round(score*10) / 10 // one decimal place
 
 	severity := scoreToSeverity(score)
 

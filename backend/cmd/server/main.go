@@ -15,77 +15,73 @@ import (
 	"github.com/kubepilot/backend/internal/bootstrap"
 	"github.com/kubepilot/backend/internal/collector"
 	"github.com/kubepilot/backend/internal/config"
+	"github.com/kubepilot/backend/internal/mcp"
 	"github.com/kubepilot/backend/internal/models"
 	"github.com/kubepilot/backend/internal/scoring"
 	"github.com/kubepilot/backend/internal/store"
 	"github.com/kubepilot/backend/internal/watcher"
-	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 )
 
+// version is the server build version, surfaced over MCP serverInfo.
+const version = "0.2.0-alpha.1"
+
 func main() {
+	// Subcommand dispatch. With no argument the HTTP server runs (the default
+	// for Docker/Helm). `kubepilot mcp` runs the MCP stdio server instead.
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		runMCP()
+		return
+	}
+	runServer()
+}
+
+// runServer boots the full HTTP API server with background workers.
+func runServer() {
 	cfg := config.Load()
 
-	logger, err := buildLogger(cfg.LogLevel)
+	logger, err := buildLogger(cfg.LogLevel, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to build logger: %v\n", err)
 		os.Exit(1)
 	}
 	defer logger.Sync() //nolint:errcheck
 
-	// -----------------------------------------------------------------------
-	// Connect to PostgreSQL
-	// -----------------------------------------------------------------------
-	db, err := connectPostgres(cfg, logger)
+	db, err := openDatabase(cfg, logger)
 	if err != nil {
-		logger.Fatal("connect to postgres", zap.Error(err))
+		logger.Fatal("open database", zap.Error(err))
 	}
-	logger.Info("connected to postgres")
+	logger.Info("database connected", zap.String("driver", cfg.StorageDriver))
 
-	// Run AutoMigrate for all models.
 	if err := db.AutoMigrate(models.AllModels()...); err != nil {
 		logger.Fatal("auto migrate", zap.Error(err))
 	}
 	logger.Info("database schema up to date")
 
-	// -----------------------------------------------------------------------
-	// Bootstrap (first-run: seed environments, create admin, register local cluster)
-	// -----------------------------------------------------------------------
 	if err := bootstrap.Run(context.Background(), db, cfg, logger); err != nil {
 		logger.Fatal("bootstrap failed", zap.Error(err))
 	}
 
-	// -----------------------------------------------------------------------
-	// Connect to Redis
-	// -----------------------------------------------------------------------
-	rdb, err := connectRedis(cfg, logger)
+	cache, err := openCache(cfg, logger)
 	if err != nil {
-		logger.Fatal("connect to redis", zap.Error(err))
+		logger.Fatal("open cache", zap.Error(err))
 	}
-	logger.Info("connected to redis")
+	defer cache.Close() //nolint:errcheck
+	logger.Info("cache ready", zap.String("driver", cfg.CacheDriver))
 
-	// -----------------------------------------------------------------------
-	// Build shared store
-	// -----------------------------------------------------------------------
-	s := store.NewStore(db, rdb, logger)
+	s := store.NewStore(db, cache, logger)
 
-	// -----------------------------------------------------------------------
-	// SSE event bus
-	// -----------------------------------------------------------------------
 	bus := handlers.NewEventBus()
 	defer bus.Stop()
 
-	// -----------------------------------------------------------------------
-	// Build HTTP server
-	// -----------------------------------------------------------------------
+	colMgr := collector.NewCollectorManager(s, logger)
+
 	if cfg.LogLevel != "debug" {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	router := api.NewRouter(cfg, s, bus, logger)
+	router := api.NewRouter(cfg, s, bus, colMgr, logger)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -95,26 +91,18 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// -----------------------------------------------------------------------
-	// Background workers
-	// -----------------------------------------------------------------------
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Collector manager — starts/stops K8s collectors per cluster.
-	colMgr := collector.NewCollectorManager(s, logger)
 	go colMgr.RunCron(ctx)
 
-	// Image watcher.
 	imgWatcher := watcher.NewImageWatcher(s, logger)
 	workerInterval := time.Duration(cfg.WorkerInterval) * time.Second
 	go imgWatcher.Run(ctx, workerInterval)
 
-	// Helm watcher.
 	helmWatcher := watcher.NewHelmWatcher(s, logger)
 	go helmWatcher.Run(ctx, workerInterval)
 
-	// Scoring engine — rescores all open findings periodically.
 	scoreEngine := scoring.NewScoringEngine(s, logger)
 	go func() {
 		// Initial scoring pass after a brief delay to allow collectors to populate data.
@@ -137,9 +125,6 @@ func main() {
 		}
 	}()
 
-	// -----------------------------------------------------------------------
-	// Start HTTP server
-	// -----------------------------------------------------------------------
 	go func() {
 		logger.Info("HTTP server listening", zap.String("addr", srv.Addr))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -147,29 +132,23 @@ func main() {
 		}
 	}()
 
-	// -----------------------------------------------------------------------
-	// Graceful shutdown on SIGTERM / SIGINT
-	// -----------------------------------------------------------------------
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
 	<-quit
 
 	logger.Info("shutting down …")
 
-	// Cancel background workers.
 	cancel()
 	colMgr.Stop()
 	imgWatcher.Stop()
 	helmWatcher.Stop()
 
-	// Drain HTTP connections.
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("http server shutdown", zap.Error(err))
 	}
 
-	// Close DB pool.
 	if sqlDB, err := db.DB(); err == nil {
 		sqlDB.Close()
 	}
@@ -177,65 +156,83 @@ func main() {
 	logger.Info("shutdown complete")
 }
 
-// connectPostgres opens a GORM connection to PostgreSQL.
-func connectPostgres(cfg *config.Config, logger *zap.Logger) (*gorm.DB, error) {
-	if cfg.DatabaseURL == "" {
-		return nil, fmt.Errorf("DB_URL is required")
-	}
+// runMCP boots the Model Context Protocol server over stdio. stdout is reserved
+// for the JSON-RPC channel, so all logging is sent to stderr.
+func runMCP() {
+	cfg := config.Load()
 
-	gormCfg := &gorm.Config{
-		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
-	}
-	if cfg.LogLevel == "debug" {
-		gormCfg.Logger = gormlogger.Default.LogMode(gormlogger.Info)
-	}
-
-	var db *gorm.DB
-	var err error
-	for attempt := 1; attempt <= 10; attempt++ {
-		db, err = gorm.Open(postgres.Open(cfg.DatabaseURL), gormCfg)
-		if err == nil {
-			sqlDB, sqlErr := db.DB()
-			if sqlErr == nil {
-				sqlDB.SetMaxOpenConns(25)
-				sqlDB.SetMaxIdleConns(5)
-				sqlDB.SetConnMaxLifetime(5 * time.Minute)
-				if pingErr := sqlDB.Ping(); pingErr == nil {
-					return db, nil
-				}
-			}
-		}
-		logger.Warn("waiting for postgres",
-			zap.Int("attempt", attempt),
-			zap.Error(err),
-		)
-		time.Sleep(3 * time.Second)
-	}
-	return nil, fmt.Errorf("could not connect to postgres after 10 attempts: %w", err)
-}
-
-// connectRedis opens a Redis client and verifies connectivity.
-func connectRedis(cfg *config.Config, logger *zap.Logger) (*redis.Client, error) {
-	opt, err := redis.ParseURL(cfg.RedisURL)
+	logger, err := buildLogger(cfg.LogLevel, os.Stderr)
 	if err != nil {
-		return nil, fmt.Errorf("parse redis URL: %w", err)
+		fmt.Fprintf(os.Stderr, "failed to build logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer logger.Sync() //nolint:errcheck
+
+	db, err := openDatabase(cfg, logger)
+	if err != nil {
+		logger.Fatal("open database", zap.Error(err))
+	}
+	// Ensure the schema exists (no-op if the server already created it).
+	if err := db.AutoMigrate(models.AllModels()...); err != nil {
+		logger.Fatal("auto migrate", zap.Error(err))
 	}
 
-	rdb := redis.NewClient(opt)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	cache, err := openCache(cfg, logger)
+	if err != nil {
+		logger.Fatal("open cache", zap.Error(err))
+	}
+	defer cache.Close() //nolint:errcheck
+
+	s := store.NewStore(db, cache, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	go func() {
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
+		<-quit
+		cancel()
+	}()
 
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("ping redis: %w", err)
+	logger.Info("mcp stdio server starting", zap.Bool("allow_writes", cfg.MCPAllowWrites))
+	srv := mcp.NewServer(s, version, cfg.MCPAllowWrites, logger)
+	if err := srv.ServeStdio(ctx, os.Stdin, os.Stdout); err != nil && err != context.Canceled {
+		logger.Error("mcp server exited", zap.Error(err))
 	}
-	return rdb, nil
 }
 
-// buildLogger constructs a zap.Logger with the given level.
-func buildLogger(level string) (*zap.Logger, error) {
+// openDatabase opens the configured storage backend.
+func openDatabase(cfg *config.Config, logger *zap.Logger) (*gorm.DB, error) {
+	debug := cfg.LogLevel == "debug"
+	switch cfg.StorageDriver {
+	case config.StorageDriverSQLite:
+		return store.OpenSQLite(cfg.SQLitePath, debug, logger)
+	default:
+		return store.OpenPostgres(cfg.DatabaseURL, debug, logger)
+	}
+}
+
+// openCache opens the configured cache backend.
+func openCache(cfg *config.Config, logger *zap.Logger) (store.Cache, error) {
+	switch cfg.CacheDriver {
+	case config.CacheDriverMemory:
+		return store.NewMemoryCache(), nil
+	default:
+		return store.NewRedisCache(cfg.RedisURL)
+	}
+}
+
+// buildLogger constructs a zap.Logger writing to the given destination. MCP mode
+// logs to stderr to keep stdout clean for the JSON-RPC channel.
+func buildLogger(level string, dest *os.File) (*zap.Logger, error) {
 	var zapLevel zapcore.Level
 	if err := zapLevel.UnmarshalText([]byte(level)); err != nil {
 		zapLevel = zapcore.InfoLevel
+	}
+
+	outputPath := "stdout"
+	if dest == os.Stderr {
+		outputPath = "stderr"
 	}
 
 	cfg := zap.Config{
@@ -243,7 +240,7 @@ func buildLogger(level string) (*zap.Logger, error) {
 		Development:      zapLevel == zapcore.DebugLevel,
 		Encoding:         "json",
 		EncoderConfig:    zap.NewProductionEncoderConfig(),
-		OutputPaths:      []string{"stdout"},
+		OutputPaths:      []string{outputPath},
 		ErrorOutputPaths: []string{"stderr"},
 	}
 	cfg.EncoderConfig.TimeKey = "ts"

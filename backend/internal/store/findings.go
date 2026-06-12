@@ -81,8 +81,7 @@ func (s *Store) ListFindings(ctx context.Context, filter FindingFilter) ([]Findi
 		ClusterName   string   `gorm:"column:cluster_name"`
 	}
 
-	var rows []row
-	err := s.DB.WithContext(ctx).
+	rowsQ := s.DB.WithContext(ctx).
 		Table("update_findings uf").
 		Select(`uf.*,
 			rs.score,
@@ -91,8 +90,26 @@ func (s *Store) ListFindings(ctx context.Context, filter FindingFilter) ([]Findi
 			c.name  AS cluster_name`).
 		Joins("LEFT JOIN risk_scores rs ON rs.finding_id = uf.id").
 		Joins("LEFT JOIN workloads w  ON w.id  = uf.workload_id").
-		Joins("LEFT JOIN clusters c  ON c.id  = uf.cluster_id").
-		Where(buildFindingWhere(filter)).
+		Joins("LEFT JOIN clusters c  ON c.id  = uf.cluster_id")
+
+	if filter.ClusterID != "" {
+		rowsQ = rowsQ.Where("uf.cluster_id = ?", filter.ClusterID)
+	}
+	if filter.NamespaceID != "" {
+		rowsQ = rowsQ.Where("uf.namespace_name IN (SELECT name FROM namespaces WHERE id = ?)", filter.NamespaceID)
+	}
+	if filter.Severity != "" {
+		rowsQ = rowsQ.Where("uf.severity = ?", filter.Severity)
+	}
+	if filter.Status != "" {
+		rowsQ = rowsQ.Where("uf.status = ?", filter.Status)
+	}
+	if filter.Kind != "" {
+		rowsQ = rowsQ.Where("uf.kind = ?", filter.Kind)
+	}
+
+	var rows []row
+	err := rowsQ.
 		Order("COALESCE(rs.score, 0) DESC").
 		Limit(limit).
 		Offset(filter.Offset).
@@ -112,24 +129,6 @@ func (s *Store) ListFindings(ctx context.Context, filter FindingFilter) ([]Findi
 		}
 	}
 	return out, total, nil
-}
-
-// buildFindingWhere converts a FindingFilter into a GORM condition map.
-func buildFindingWhere(f FindingFilter) map[string]interface{} {
-	cond := map[string]interface{}{}
-	if f.ClusterID != "" {
-		cond["uf.cluster_id"] = f.ClusterID
-	}
-	if f.Severity != "" {
-		cond["uf.severity"] = f.Severity
-	}
-	if f.Status != "" {
-		cond["uf.status"] = f.Status
-	}
-	if f.Kind != "" {
-		cond["uf.kind"] = f.Kind
-	}
-	return cond
 }
 
 // GetFinding retrieves a single finding by ID with all associations.
@@ -266,6 +265,40 @@ func (s *Store) GetFindingSummary(ctx context.Context, clusterIDs []string) (Fin
 		}
 	}
 	return summary, nil
+}
+
+// activeFindingStatuses lists the statuses considered "still actionable" — these are
+// the findings that should be auto-resolved once the underlying resource is up-to-date.
+var activeFindingStatuses = []string{
+	models.FindingStatusOpen,
+	models.FindingStatusPlanned,
+	models.FindingStatusApproved,
+}
+
+// ResolveActiveFindingForImage marks any still-active finding for the given container
+// image as resolved. Called when the watcher detects the image is back up-to-date.
+func (s *Store) ResolveActiveFindingForImage(ctx context.Context, imageID uuid.UUID) error {
+	return s.resolveActiveFindings(ctx, "container_image_id = ?", imageID)
+}
+
+// ResolveActiveFindingForHelm marks any still-active finding for the given Helm
+// release as resolved. Called when the watcher detects the chart is back up-to-date.
+func (s *Store) ResolveActiveFindingForHelm(ctx context.Context, helmReleaseID uuid.UUID) error {
+	return s.resolveActiveFindings(ctx, "helm_release_id = ?", helmReleaseID)
+}
+
+func (s *Store) resolveActiveFindings(ctx context.Context, cond string, arg interface{}) error {
+	now := time.Now()
+	return s.DB.WithContext(ctx).
+		Model(&models.UpdateFinding{}).
+		Where(cond, arg).
+		Where("status IN ?", activeFindingStatuses).
+		Updates(map[string]interface{}{
+			"status":            models.FindingStatusResolved,
+			"resolved_at":       now,
+			"status_changed_at": now,
+			"updated_at":        now,
+		}).Error
 }
 
 // GetOpenFindingsForCluster returns all open findings for a cluster (used by scoring).

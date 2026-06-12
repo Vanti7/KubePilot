@@ -48,15 +48,25 @@ func (eb *EventBus) Publish(event SSEEvent) {
 }
 
 // Subscribe returns a channel that receives published events.
+// If the bus has already stopped, the returned channel is closed immediately so
+// callers never block waiting on a bus that will never read.
 func (eb *EventBus) Subscribe() chan SSEEvent {
 	ch := make(chan SSEEvent, 64)
-	eb.subscribe <- ch
+	select {
+	case eb.subscribe <- ch:
+	case <-eb.quit:
+		close(ch)
+	}
 	return ch
 }
 
 // Unsubscribe removes the channel from the subscriber list.
+// It is a no-op once the bus has stopped, to avoid blocking on a closed bus.
 func (eb *EventBus) Unsubscribe(ch chan SSEEvent) {
-	eb.unsubscribe <- ch
+	select {
+	case eb.unsubscribe <- ch:
+	case <-eb.quit:
+	}
 }
 
 // Stop shuts down the event bus.

@@ -110,7 +110,11 @@ func (hw *HelmWatcher) CheckRelease(ctx context.Context, release *models.HelmRel
 	}
 
 	if !latestSV.GreaterThan(currentSV) {
-		return nil // Already up-to-date.
+		// Already up-to-date — resolve any finding that was previously open for this release.
+		if err := hw.store.ResolveActiveFindingForHelm(ctx, release.ID); err != nil {
+			hw.logger.Warn("resolve helm finding", zap.String("release", release.Name), zap.Error(err))
+		}
+		return nil
 	}
 
 	updateType := classifyUpdate(currentSV, latestSV)
@@ -159,7 +163,7 @@ func (hw *HelmWatcher) fetchIndex(ctx context.Context, repoURL string) (*helmInd
 	cacheKey := "helmidx:" + repoURL
 
 	// Try cache.
-	cached, err := hw.store.Redis.Get(ctx, cacheKey).Result()
+	cached, err := hw.store.Cache.Get(ctx, cacheKey)
 	if err == nil {
 		var idx helmIndex
 		if jsonErr := json.Unmarshal([]byte(cached), &idx); jsonErr == nil {
@@ -197,7 +201,7 @@ func (hw *HelmWatcher) fetchIndex(ctx context.Context, repoURL string) (*helmInd
 
 	// Cache the index.
 	if data, jsonErr := json.Marshal(&idx); jsonErr == nil {
-		hw.store.Redis.Set(ctx, cacheKey, data, helmIndexCacheTTL)
+		_ = hw.store.Cache.Set(ctx, cacheKey, data, helmIndexCacheTTL)
 	}
 
 	return &idx, nil

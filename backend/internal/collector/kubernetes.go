@@ -16,6 +16,7 @@ import (
 	"github.com/kubepilot/backend/internal/models"
 	"github.com/kubepilot/backend/internal/store"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/ssh"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,6 +35,7 @@ type KubernetesCollector struct {
 	logger    *zap.Logger
 	stopCh    chan struct{}
 	wg        sync.WaitGroup
+	sshClient *ssh.Client // non-nil only for ssh connection mode; closed on Stop
 }
 
 // NewKubernetesCollector builds a KubernetesCollector for the given cluster model.
@@ -41,8 +43,27 @@ type KubernetesCollector struct {
 func NewKubernetesCollector(cluster *models.Cluster, s *store.Store, logger *zap.Logger) (*KubernetesCollector, error) {
 	var restConfig *rest.Config
 	var err error
+	var sshClient *ssh.Client
 
-	if cluster.KubeconfigRef != "" {
+	if cluster.ConnectionMode == models.ClusterConnSSH || cluster.SSHHost != "" {
+		// SSH mode: connect to the node, read its kubeconfig, then tunnel all
+		// Kubernetes API traffic through the SSH connection.
+		sshClient, err = sshDialClient(cluster)
+		if err != nil {
+			return nil, fmt.Errorf("ssh connect for cluster %s: %w", cluster.ID, err)
+		}
+		kubeconfigBytes, kErr := fetchRemoteKubeconfig(sshClient, cluster)
+		if kErr != nil {
+			sshClient.Close()
+			return nil, fmt.Errorf("fetch remote kubeconfig for cluster %s: %w", cluster.ID, kErr)
+		}
+		restConfig, err = clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+		if err != nil {
+			sshClient.Close()
+			return nil, fmt.Errorf("parse remote kubeconfig for cluster %s: %w", cluster.ID, err)
+		}
+		restConfig.Dial = sshTunnelDialer(sshClient)
+	} else if cluster.KubeconfigRef != "" {
 		// KubeconfigRef is treated as the literal kubeconfig content (base64-encoded or raw YAML).
 		raw, decErr := base64.StdEncoding.DecodeString(cluster.KubeconfigRef)
 		if decErr != nil {
@@ -62,11 +83,17 @@ func NewKubernetesCollector(cluster *models.Cluster, s *store.Store, logger *zap
 	}
 
 	if err != nil {
+		if sshClient != nil {
+			sshClient.Close()
+		}
 		return nil, fmt.Errorf("build rest config for cluster %s: %w", cluster.ID, err)
 	}
 
 	clientset, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
+		if sshClient != nil {
+			sshClient.Close()
+		}
 		return nil, fmt.Errorf("create clientset for cluster %s: %w", cluster.ID, err)
 	}
 
@@ -76,6 +103,7 @@ func NewKubernetesCollector(cluster *models.Cluster, s *store.Store, logger *zap
 		store:     s,
 		logger:    logger.With(zap.String("cluster_id", cluster.ID.String()), zap.String("cluster_name", cluster.Name)),
 		stopCh:    make(chan struct{}),
+		sshClient: sshClient,
 	}, nil
 }
 
@@ -94,6 +122,14 @@ func (kc *KubernetesCollector) Start(ctx context.Context) {
 func (kc *KubernetesCollector) runPeriodicCollection(ctx context.Context) {
 	kc.collectAll(ctx)
 
+	// Start the long-lived resource watchers exactly once. Each watcher reconnects
+	// internally when the API server closes its watch channel, so they must not be
+	// re-spawned on every collection pass (that previously leaked goroutines).
+	kc.wg.Add(3)
+	go func() { defer kc.wg.Done(); kc.watchNamespaces(ctx) }()
+	go func() { defer kc.wg.Done(); kc.watchNodes(ctx) }()
+	go func() { defer kc.wg.Done(); kc.watchSecrets(ctx) }()
+
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
@@ -108,6 +144,11 @@ func (kc *KubernetesCollector) runPeriodicCollection(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// Collect triggers an immediate, one-off collection pass (used by the manual sync endpoint).
+func (kc *KubernetesCollector) Collect(ctx context.Context) {
+	kc.collectAll(ctx)
 }
 
 // collectAll runs all collection routines sequentially.
@@ -160,48 +201,54 @@ func (kc *KubernetesCollector) collectNamespaces(ctx context.Context) {
 			kc.logger.Error("upsert namespace", zap.String("name", ns.Name), zap.Error(err))
 		}
 	}
-
-	kc.wg.Add(1)
-	go func() {
-		defer kc.wg.Done()
-		kc.watchNamespaces(ctx)
-	}()
 }
 
+// watchNamespaces watches namespace changes, reconnecting whenever the API server
+// closes the watch channel, until the collector is stopped.
 func (kc *KubernetesCollector) watchNamespaces(ctx context.Context) {
-	watcher, err := kc.clientset.CoreV1().Namespaces().Watch(ctx, metav1.ListOptions{})
-	if err != nil {
-		kc.logger.Error("watch namespaces", zap.Error(err))
-		return
-	}
-	defer watcher.Stop()
-
 	clusterUUID, _ := uuid.Parse(kc.clusterID)
 
 	for {
-		select {
-		case event, ok := <-watcher.ResultChan():
-			if !ok {
+		if kc.stopping(ctx) {
+			return
+		}
+		watcher, err := kc.clientset.CoreV1().Namespaces().Watch(ctx, metav1.ListOptions{})
+		if err != nil {
+			kc.logger.Error("watch namespaces", zap.Error(err))
+			if !kc.waitBeforeRetry(ctx) {
 				return
 			}
-			ns, ok := event.Object.(*corev1.Namespace)
-			if !ok {
-				continue
+			continue
+		}
+
+		drained := func() bool {
+			defer watcher.Stop()
+			for {
+				select {
+				case event, ok := <-watcher.ResultChan():
+					if !ok {
+						return true // channel closed — reconnect
+					}
+					ns, ok := event.Object.(*corev1.Namespace)
+					if !ok || event.Type == watch.Deleted {
+						continue
+					}
+					labelsJSON, _ := json.Marshal(ns.Labels)
+					model := &models.Namespace{
+						ClusterID: clusterUUID,
+						Name:      ns.Name,
+						Status:    string(ns.Status.Phase),
+						Labels:    datatypes.JSON(labelsJSON),
+					}
+					_ = kc.store.UpsertNamespace(ctx, model)
+				case <-kc.stopCh:
+					return false
+				case <-ctx.Done():
+					return false
+				}
 			}
-			if event.Type == watch.Deleted {
-				continue
-			}
-			labelsJSON, _ := json.Marshal(ns.Labels)
-			model := &models.Namespace{
-				ClusterID: clusterUUID,
-				Name:      ns.Name,
-				Status:    string(ns.Status.Phase),
-				Labels:    datatypes.JSON(labelsJSON),
-			}
-			_ = kc.store.UpsertNamespace(ctx, model)
-		case <-kc.stopCh:
-			return
-		case <-ctx.Done():
+		}()
+		if !drained {
 			return
 		}
 	}
@@ -223,42 +270,47 @@ func (kc *KubernetesCollector) collectNodes(ctx context.Context) {
 			kc.logger.Error("upsert node", zap.String("name", n.Name), zap.Error(err))
 		}
 	}
-
-	kc.wg.Add(1)
-	go func() {
-		defer kc.wg.Done()
-		kc.watchNodes(ctx)
-	}()
 }
 
+// watchNodes watches node changes, reconnecting on channel close until stopped.
 func (kc *KubernetesCollector) watchNodes(ctx context.Context) {
-	watcher, err := kc.clientset.CoreV1().Nodes().Watch(ctx, metav1.ListOptions{})
-	if err != nil {
-		kc.logger.Error("watch nodes", zap.Error(err))
-		return
-	}
-	defer watcher.Stop()
-
 	clusterUUID, _ := uuid.Parse(kc.clusterID)
 
 	for {
-		select {
-		case event, ok := <-watcher.ResultChan():
-			if !ok {
+		if kc.stopping(ctx) {
+			return
+		}
+		watcher, err := kc.clientset.CoreV1().Nodes().Watch(ctx, metav1.ListOptions{})
+		if err != nil {
+			kc.logger.Error("watch nodes", zap.Error(err))
+			if !kc.waitBeforeRetry(ctx) {
 				return
 			}
-			node, ok := event.Object.(*corev1.Node)
-			if !ok {
-				continue
+			continue
+		}
+
+		drained := func() bool {
+			defer watcher.Stop()
+			for {
+				select {
+				case event, ok := <-watcher.ResultChan():
+					if !ok {
+						return true
+					}
+					node, ok := event.Object.(*corev1.Node)
+					if !ok || event.Type == watch.Deleted {
+						continue
+					}
+					model := nodeFromK8s(clusterUUID, node)
+					_ = kc.store.UpsertNode(ctx, model)
+				case <-kc.stopCh:
+					return false
+				case <-ctx.Done():
+					return false
+				}
 			}
-			if event.Type == watch.Deleted {
-				continue
-			}
-			model := nodeFromK8s(clusterUUID, node)
-			_ = kc.store.UpsertNode(ctx, model)
-		case <-kc.stopCh:
-			return
-		case <-ctx.Done():
+		}()
+		if !drained {
 			return
 		}
 	}
@@ -379,47 +431,77 @@ func (kc *KubernetesCollector) collectSecrets(ctx context.Context) {
 			kc.logger.Error("upsert secret", zap.String("name", s.Name), zap.Error(err))
 		}
 	}
-
-	kc.wg.Add(1)
-	go func() {
-		defer kc.wg.Done()
-		kc.watchSecrets(ctx)
-	}()
 }
 
+// watchSecrets watches secret changes, reconnecting on channel close until stopped.
 func (kc *KubernetesCollector) watchSecrets(ctx context.Context) {
-	watcher, err := kc.clientset.CoreV1().Secrets("").Watch(ctx, metav1.ListOptions{})
-	if err != nil {
-		kc.logger.Error("watch secrets", zap.Error(err))
-		return
-	}
-	defer watcher.Stop()
-
 	clusterUUID, _ := uuid.Parse(kc.clusterID)
 
 	for {
-		select {
-		case event, ok := <-watcher.ResultChan():
-			if !ok {
-				return
-			}
-			secret, ok := event.Object.(*corev1.Secret)
-			if !ok {
-				continue
-			}
-			if event.Type == watch.Deleted {
-				continue
-			}
-			model := secretFromK8s(clusterUUID, secret)
-			if model == nil {
-				continue
-			}
-			_ = kc.store.UpsertSecret(ctx, model)
-		case <-kc.stopCh:
-			return
-		case <-ctx.Done():
+		if kc.stopping(ctx) {
 			return
 		}
+		watcher, err := kc.clientset.CoreV1().Secrets("").Watch(ctx, metav1.ListOptions{})
+		if err != nil {
+			kc.logger.Error("watch secrets", zap.Error(err))
+			if !kc.waitBeforeRetry(ctx) {
+				return
+			}
+			continue
+		}
+
+		drained := func() bool {
+			defer watcher.Stop()
+			for {
+				select {
+				case event, ok := <-watcher.ResultChan():
+					if !ok {
+						return true
+					}
+					secret, ok := event.Object.(*corev1.Secret)
+					if !ok || event.Type == watch.Deleted {
+						continue
+					}
+					model := secretFromK8s(clusterUUID, secret)
+					if model == nil {
+						continue
+					}
+					_ = kc.store.UpsertSecret(ctx, model)
+				case <-kc.stopCh:
+					return false
+				case <-ctx.Done():
+					return false
+				}
+			}
+		}()
+		if !drained {
+			return
+		}
+	}
+}
+
+// stopping reports whether the collector has been asked to stop.
+func (kc *KubernetesCollector) stopping(ctx context.Context) bool {
+	select {
+	case <-kc.stopCh:
+		return true
+	case <-ctx.Done():
+		return true
+	default:
+		return false
+	}
+}
+
+// waitBeforeRetry sleeps briefly before a watch reconnect attempt.
+// It returns false if the collector is stopped while waiting.
+func (kc *KubernetesCollector) waitBeforeRetry(ctx context.Context) bool {
+	select {
+	case <-time.After(5 * time.Second):
+		return true
+	case <-kc.stopCh:
+		return false
+	case <-ctx.Done():
+		return false
 	}
 }
 
@@ -427,6 +509,9 @@ func (kc *KubernetesCollector) watchSecrets(ctx context.Context) {
 func (kc *KubernetesCollector) Stop() {
 	close(kc.stopCh)
 	kc.wg.Wait()
+	if kc.sshClient != nil {
+		_ = kc.sshClient.Close()
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -475,7 +560,8 @@ func nodeFromK8s(clusterID uuid.UUID, n *corev1.Node) *models.Node {
 }
 
 func workloadFromDeployment(clusterID uuid.UUID, d *appsv1.Deployment) *models.Workload {
-	health := healthFromReplicas(d.Status.ReadyReplicas, *d.Spec.Replicas)
+	desired := replicaCount(d.Spec.Replicas)
+	health := healthFromReplicas(d.Status.ReadyReplicas, desired)
 	labelsJSON, _ := json.Marshal(d.Labels)
 	annotationsJSON, _ := json.Marshal(d.Annotations)
 
@@ -485,7 +571,7 @@ func workloadFromDeployment(clusterID uuid.UUID, d *appsv1.Deployment) *models.W
 		Name:            d.Name,
 		NamespaceName:   d.Namespace,
 		Kind:            models.WorkloadKindDeployment,
-		ReplicasDesired: *d.Spec.Replicas,
+		ReplicasDesired: desired,
 		ReplicasReady:   d.Status.ReadyReplicas,
 		HealthStatus:    health,
 		Labels:          datatypes.JSON(labelsJSON),
@@ -515,7 +601,8 @@ func workloadFromDaemonSet(clusterID uuid.UUID, ds *appsv1.DaemonSet) *models.Wo
 }
 
 func workloadFromStatefulSet(clusterID uuid.UUID, ss *appsv1.StatefulSet) *models.Workload {
-	health := healthFromReplicas(ss.Status.ReadyReplicas, *ss.Spec.Replicas)
+	desired := replicaCount(ss.Spec.Replicas)
+	health := healthFromReplicas(ss.Status.ReadyReplicas, desired)
 	labelsJSON, _ := json.Marshal(ss.Labels)
 	annotationsJSON, _ := json.Marshal(ss.Annotations)
 
@@ -525,12 +612,21 @@ func workloadFromStatefulSet(clusterID uuid.UUID, ss *appsv1.StatefulSet) *model
 		Name:            ss.Name,
 		NamespaceName:   ss.Namespace,
 		Kind:            models.WorkloadKindStatefulSet,
-		ReplicasDesired: *ss.Spec.Replicas,
+		ReplicasDesired: desired,
 		ReplicasReady:   ss.Status.ReadyReplicas,
 		HealthStatus:    health,
 		Labels:          datatypes.JSON(labelsJSON),
 		Annotations:     datatypes.JSON(annotationsJSON),
 	}
+}
+
+// replicaCount safely dereferences a *int32 replica field. The Kubernetes API
+// leaves Spec.Replicas nil to mean "default to 1", so a nil pointer must not panic.
+func replicaCount(r *int32) int32 {
+	if r == nil {
+		return 1
+	}
+	return *r
 }
 
 func healthFromReplicas(ready, desired int32) string {

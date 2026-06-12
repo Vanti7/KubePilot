@@ -78,6 +78,25 @@ func (m *CollectorManager) SyncClusters(ctx context.Context) {
 	}
 }
 
+// TriggerSync runs an immediate collection pass for a single cluster, if a collector
+// is currently active for it. The collection runs in the background so callers (e.g. the
+// HTTP sync endpoint) do not block. Returns false if no collector is running for the cluster.
+func (m *CollectorManager) TriggerSync(clusterID string) bool {
+	m.mu.Lock()
+	kc, ok := m.collectors[clusterID]
+	m.mu.Unlock()
+	if !ok {
+		return false
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		kc.Collect(ctx)
+	}()
+	return true
+}
+
 // RunCron periodically calls SyncClusters and blocks until ctx is cancelled or Stop is called.
 func (m *CollectorManager) RunCron(ctx context.Context) {
 	// Perform an immediate sync on start.
