@@ -142,14 +142,16 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ### Ce qui manque avant la première beta
 
-- [ ] `go.sum` généré (nécessite `go mod tidy` dans `backend/`)
+- [x] `go.sum` généré (`go mod tidy` — fait, v0.2.0-alpha.1)
+- [x] Vérification que le code compile sans erreurs (`go build ./...` + `go vet` OK)
+- [ ] **Accès registries effectif → findings réels** : Docker Hub (auth token anonyme à corriger — renvoie 401), CA/TLS-insecure par registre pour Harbor self-signed. **Bloquant pour l'utilité réelle** : sans ça, le watcher d'images ne produit aucun finding et l'app reste une vitrine d'inventaire (voir [[project-next-priority-findings]])
+- [ ] Gestion des registries privés dans l'UI (Harbor, ECR, GCR, ACR)
+- [ ] **Finalisation** : nettoyage en cascade des `container_images` orphelines au `DeleteWorkloadsNotSeenSince` (sinon `record not found` dans le watcher d'images ; aujourd'hui juste loggé en debug)
 - [ ] Tests unitaires backend (scoring engine, semver comparison, store)
 - [ ] Tests d'intégration frontend (Playwright)
 - [ ] Seed data pour démo / développement local
 - [ ] Page Settings (gestion utilisateurs, variables globales)
-- [ ] Gestion des registries privés dans l'UI (Harbor, ECR, GCR, ACR)
 - [ ] Page History (audit log des actions)
-- [ ] Vérification que le code compile sans erreurs (`go build ./...`)
 
 ---
 
