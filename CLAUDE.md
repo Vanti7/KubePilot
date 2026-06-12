@@ -79,7 +79,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ## État actuel du projet
 
-**Version courante** : `v0.1.0-alpha.2` (2026-05-24)
+**Version courante** : `v0.2.0-alpha.1` (2026-06-12)
 **Canal** : alpha
 **Branche principale** : `main`
 
@@ -185,6 +185,25 @@ Voir `docs/scoring.md` pour la formule complète.
 ### In-cluster vs dev local
 - En production (Helm) : `IN_CLUSTER=true`, le pod utilise son SA token.
 - En dev local : `IN_CLUSTER=false`, fournir un kubeconfig via l'UI ou l'API.
+
+### Stockage pluggable (depuis Unreleased)
+- Drivers sélectionnables : `STORAGE_DRIVER` (`postgres`|`sqlite`) et `CACHE_DRIVER` (`redis`|`memory`).
+- **`LOCAL_MODE=true`** = raccourci single-binary : SQLite (`SQLITE_PATH`, défaut `kubepilot.db`) + cache mémoire + auto-enregistrement du cluster depuis le kubeconfig (`KUBECONFIG_PATH`). Aucun PostgreSQL/Redis requis.
+- Défauts : `DB_URL` vide ou `LOCAL_MODE=true` → SQLite + mémoire ; sinon PostgreSQL + Redis.
+- **UUID** : assignés côté Go via un callback GORM `BeforeCreate` (`store/open.go`), pas via `gen_random_uuid()`. Ne **pas** réintroduire `default:gen_random_uuid()` dans les tags des modèles — ça casse SQLite. Les `migrations/*.sql` restent PostgreSQL-only (non exécutées par `AutoMigrate`).
+- Le cache passe par l'interface `store.Cache` (`store/cache.go`). Ne plus utiliser `store.Redis` directement.
+
+### Connexion cluster par SSH (depuis Unreleased)
+- `Cluster.ConnectionMode == "ssh"` (ou `SSHHost` non vide) : le collector (`collector/ssh.go`) ouvre une session SSH (auth mot de passe), lit le kubeconfig du nœud (`cat`/`sudo -S cat`), construit le `rest.Config` depuis ce kubeconfig, puis **route `rest.Config.Dial` à travers le client SSH** (`sshTunnelDialer`) — donc l'API server `127.0.0.1:6443` du nœud est joint via le tunnel.
+- Le `*ssh.Client` vit sur le `KubernetesCollector` et est fermé dans `Stop()`.
+- Configuré en mode local par `SSH_HOST`/`SSH_USER`/`SSH_PASSWORD`/`SSH_PORT`/`SSH_KUBECONFIG_PATH`/`SSH_SUDO` ; le bootstrap enregistre alors le cluster en mode ssh.
+- Clé d'hôte non épinglée (`InsecureIgnoreHostKey`) en alpha — à durcir (known_hosts) avant prod. `ssh_password` a le tag `json:"-"`.
+
+### MCP (Model Context Protocol)
+- Sous-commande `kubepilot mcp` = serveur MCP JSON-RPC 2.0 sur stdio (`internal/mcp`), stdlib uniquement.
+- En mode MCP, **stdout est réservé au JSON-RPC** : tous les logs vont sur stderr. Ne jamais écrire sur stdout dans ce chemin.
+- Outils lecture : `list_clusters`, `list_findings`, `get_finding`, `findings_summary`, `top_risks`. Écriture `set_finding_status` seulement si `MCP_ALLOW_WRITES=true`.
+- Partage le même `store.Store` que le serveur HTTP.
 
 ---
 

@@ -21,10 +21,40 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [0.2.0-alpha.1] — 2026-06-12
+
+> Mode local single-binary (SQLite + cache mémoire), serveur MCP, connexion cluster par SSH avec tunnel d'API,
+> et corrections de robustesse (collecte SQLite, UI). Première version utilisable sans PostgreSQL/Redis ni
+> accès réseau direct à l'API server.
+> **Canal : alpha** — ne pas utiliser en production.
+
 ### Added
+- **Connexion cluster par SSH** (`connection_mode = "ssh"`) — KubePilot se connecte en SSH à un nœud, lit son kubeconfig et **fait transiter tout le trafic de l'API Kubernetes dans la connexion SSH**. Permet d'atteindre un cluster dont l'API server (6443/443) n'est pas joignable directement depuis le poste
+  - Champs `Cluster` : `connection_mode`, `ssh_host`, `ssh_port` (défaut 22), `ssh_user`, `ssh_password` (jamais renvoyé en API), `ssh_kubeconfig_path`, `ssh_sudo`
+  - **UI** : nouvelle page **Clusters** (`/clusters`, entrée sidebar) — liste des clusters (env, mode de connexion, statut, dernière collecte) avec actions Sync/Delete, et modal d'ajout avec sélecteur de mode **Kubeconfig / SSH** (champs SSH conditionnels : host, port, user, password, chemin kubeconfig, sudo)
+  - **API** : `POST` / `PUT /api/v1/clusters` acceptent désormais `connection_mode` + `ssh_host`/`ssh_port`/`ssh_user`/`ssh_password`/`ssh_kubeconfig_path`/`ssh_sudo` ; validation 400 si `ssh_host`/`ssh_user` manquants en mode ssh
+  - Variables d'env (mode local) : `SSH_HOST`, `SSH_PORT`, `SSH_USER`, `SSH_PASSWORD`, `SSH_KUBECONFIG_PATH`, `SSH_SUDO` — quand `SSH_HOST` est défini, le cluster local est enregistré en mode SSH au bootstrap
+  - Lecture du kubeconfig distant via `cat` (ou `sudo -S cat` si `ssh_sudo`), avec fallback sur les emplacements courants (`/etc/rancher/k3s/k3s.yaml`, `~/.kube/config`, `/etc/kubernetes/admin.conf`)
+  - Auth par mot de passe ; clé d'hôte non épinglée en alpha (`InsecureIgnoreHostKey`) — usage réseau de confiance / bastion
+  - Migration `005_cluster_ssh.sql` (parité PostgreSQL ; AutoMigrate applique les colonnes)
+- **Mode local single-binary (`LOCAL_MODE=true`)** — KubePilot tourne sur un poste sans PostgreSQL ni Redis, pour tester rapidement contre un cluster
+  - Stockage SQLite (driver pur-Go `glebarez/sqlite`, sans CGO) sélectionné automatiquement quand `LOCAL_MODE=true` ou quand `DB_URL` est vide ; chemin configurable via `SQLITE_PATH` (défaut `kubepilot.db`)
+  - Cache en mémoire (`MemoryCache` avec TTL + janitor) en remplacement de Redis ; abstraction `store.Cache` (impl. `RedisCache` / `MemoryCache`) — les watchers ne dépendent plus de Redis directement
+  - Auto-enregistrement du cluster local depuis le kubeconfig de l'utilisateur (`KUBECONFIG_PATH` ou règles de chargement par défaut) — le kubeconfig fusionné est stocké base64 dans `KubeconfigRef`
+  - Sélection de driver explicite possible : `STORAGE_DRIVER` (`postgres`|`sqlite`), `CACHE_DRIVER` (`redis`|`memory`)
+  - Modèles rendus agnostiques du SGBD : génération des UUID v4 côté Go via un callback GORM `BeforeCreate` (plus de dépendance à `gen_random_uuid()` PostgreSQL)
+- **Serveur MCP (Model Context Protocol)** — sous-commande `kubepilot mcp` exposant les findings et scores de risque à un assistant IA (Claude, Cursor, …) via JSON-RPC 2.0 sur stdio (stdlib uniquement, sans dépendance)
+  - Outils en lecture : `list_clusters`, `list_findings`, `get_finding`, `findings_summary`, `top_risks`
+  - Outil en écriture `set_finding_status` (activé seulement si `MCP_ALLOW_WRITES=true`)
+  - Logs redirigés vers stderr en mode MCP pour garder stdout propre pour le canal JSON-RPC
 - Endpoint `GET /api/v1/namespaces` — listing des namespaces avec filtre `cluster_id` (manquait dans le router, causait des 404 sur les pages Inventory et Secrets)
 - Endpoints `GET/POST/DELETE /api/v1/integrations` + `POST /api/v1/integrations/:id/test` — CRUD complet des comptes d'intégration (manquaient dans le router, causaient des 404 + crash page Integrations)
 - Migration `004_finding_unique_constraint.sql` — index uniques `(cluster_id, container_image_id)` et `(cluster_id, helm_release_id)` sur `update_findings`
+- Migration `006_collection_unique_indexes.sql` + index uniques déclarés sur les modèles GORM (`uq_node`, `uq_workload`, `uq_container_image`, `uq_image_tag`, `uq_helm_release`, `uq_secret`) — requis pour que les upserts `clause.OnConflict` du collecteur fonctionnent aussi sur SQLite (ces contraintes n'existaient que dans les migrations SQL PostgreSQL)
+- `ErrorBoundary` React — tout crash de rendu affiche désormais un message d'erreur lisible (message + stack + bouton Reload) au lieu d'un écran noir muet
+
+### Changed
+- `GET /health/connectors` — clés `postgres`/`redis` renommées en `database`/`cache` (le backend supporte désormais SQLite + cache mémoire en plus de PostgreSQL + Redis)
 
 ### Added (précédent)
 - Gestion des Secrets Kubernetes — affichage des secrets avec namespace, type, noms de clés et timestamps K8s (valeurs jamais stockées)
@@ -38,6 +68,18 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
   - Lien "Secrets" dans la sidebar (icône `KeyRound`)
 
 ### Fixed
+- **Bug (collector)** : duplication des nodes — `UpsertNode` utilisait `Where(cluster_id,name).FirstOrCreate(node)`, mais `nodeFromK8s` posait un `ID` aléatoire à chaque passe que GORM ajoutait à la condition du `First` (`… AND id=<random>`) → jamais trouvé, une nouvelle ligne créée à chaque cycle. Passé en `clause.OnConflict` sur `(cluster_id, name)` (index `uq_node`), l'`id` existant est préservé
+- **Bug (frontend)** : `ClusterSelector` plantait (écran noir global, le sélecteur étant dans la topbar) sur un cluster au statut `unknown` — absent de la table de styles → `dot.color` sur `undefined`. Ajout de l'entrée `unknown` + fallback
+- **Bug (frontend)** : `Object.keys(...)` sur des champs JSON `null` (labels workload, capacity/allocatable node, factors du risk score) plantait les panneaux de détail — guards `?? {}` (le backend sérialise les maps vides en `null`)
+- **Bug (frontend)** : l'arbre namespace d'Inventory/Secrets affichait un nom de cluster vide (`display_name` jamais renvoyé par le backend) → fallback sur `name`
+- **Bug critique (collector)** : fuite de goroutines de watch — `collectAll` (toutes les 60 s) relançait à chaque passe un nouveau watcher namespaces/nodes/secrets sans arrêter les précédents → accumulation illimitée de goroutines, connexions watch et écritures DB. Les watchers sont désormais démarrés **une seule fois** et se reconnectent en interne quand l'API server ferme le canal de watch
+- **Bug critique (collector)** : panic nil-pointer sur `*Deployment.Spec.Replicas` / `*StatefulSet.Spec.Replicas` (champ optionnel pouvant être nil côté API K8s) — comme la collecte tourne dans une goroutine sans `recover()`, cela faisait tomber tout le process. Ajout de `replicaCount()` qui retourne 1 par défaut quand le pointeur est nil
+- **Bug critique (scoring)** : l'étape de normalisation (`docs/scoring.md §7`, `MaxPossibleSum = 21.6`) était omise — la somme pondérée brute (~0-21) écrasait la sévérité initiale et plafonnait quasiment tous les findings en `info`/`low`. Le score est désormais normalisé sur 0-100 et arrondi à une décimale ; valeurs de criticité de service alignées sur la doc (critical=15, high=10, medium=5, low=2)
+- **Bug (store)** : le filtre `namespace_id` de `ListFindings` n'était appliqué qu'au `Count` (total) et pas à la requête des lignes → total et résultats incohérents, filtre namespace sans effet. Le filtre est désormais appliqué aux deux requêtes
+- **Bug (watchers)** : les findings image/Helm n'étaient jamais clôturés automatiquement — quand une ressource repasse à jour, les findings actifs (`open`/`planned`/`approved`) sont désormais passés à `resolved` (`ResolveActiveFindingForImage` / `ResolveActiveFindingForHelm`)
+- **Bug (API)** : `POST /api/v1/clusters/:id/sync` ne faisait que réinitialiser le statut sans déclencher de collecte. Le manager de collecteurs expose désormais `TriggerSync` qui lance une passe de collecte immédiate en arrière-plan pour le cluster ; la réponse inclut `collector_active`
+- **Bug (frontend)** : `createCluster()` envoyait `{display_name, endpoint, kubeconfig}` ignorés par le backend (qui attend `api_endpoint`, `kubeconfig_ref`) → cluster créé sans endpoint ni kubeconfig. Payload aligné sur le contrat backend
+- **Robustesse (SSE)** : `EventBus.Subscribe`/`Unsubscribe` pouvaient bloquer indéfiniment après `Stop()` (envoi sur un channel plus jamais lu) ; ils sont désormais protégés par le channel `quit`
 - **Bug critique** : `UpsertFinding` utilisait `ON CONFLICT (cluster_id, kind, current_version)` sans contrainte UNIQUE correspondante dans la BDD → PostgreSQL rejetait silencieusement tous les inserts, aucun finding n'était jamais créé. Corrigé : les clés de conflict sont maintenant `(cluster_id, container_image_id)` pour les findings image et `(cluster_id, helm_release_id)` pour les findings Helm
 - Node handler : `capacity` et `allocatable` sont maintenant sérialisés en objets `{cpu, memory}` au lieu de champs plats — corrige le crash `TypeError: Cannot convert undefined or null to object` dans le slide-over des nœuds
 
@@ -164,5 +206,7 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 
 ---
 
-[Unreleased]: https://github.com/Vanti7/KubePilot/compare/v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/Vanti7/KubePilot/compare/v0.2.0-alpha.1...HEAD
+[0.2.0-alpha.1]: https://github.com/Vanti7/KubePilot/compare/v0.1.0-alpha.2...v0.2.0-alpha.1
+[0.1.0-alpha.2]: https://github.com/Vanti7/KubePilot/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/Vanti7/KubePilot/releases/tag/v0.1.0-alpha.1
