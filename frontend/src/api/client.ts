@@ -69,13 +69,24 @@ export async function getCluster(id: string): Promise<Cluster> {
   return data
 }
 
-export async function createCluster(payload: {
+export interface CreateClusterPayload {
   name: string
-  display_name: string
-  endpoint: string
-  kubeconfig?: string
-  environment_id: string
-}): Promise<Cluster> {
+  environment_id?: string
+  provider?: string
+  region?: string
+  api_endpoint?: string
+  kubeconfig_ref?: string
+  tls_insecure?: boolean
+  connection_mode?: 'kubeconfig' | 'ssh'
+  ssh_host?: string
+  ssh_port?: number
+  ssh_user?: string
+  ssh_password?: string
+  ssh_kubeconfig_path?: string
+  ssh_sudo?: boolean
+}
+
+export async function createCluster(payload: CreateClusterPayload): Promise<Cluster> {
   const { data } = await api.post<Cluster>('/clusters', payload)
   return data
 }

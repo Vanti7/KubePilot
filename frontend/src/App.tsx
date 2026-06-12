@@ -10,6 +10,7 @@ import { HelmPage } from './pages/HelmPage'
 import { Nodes } from './pages/Nodes'
 import { Integrations } from './pages/Integrations'
 import { Secrets } from './pages/Secrets'
+import { Clusters } from './pages/Clusters'
 import { ClusterDetail } from './pages/ClusterDetail'
 
 function ProtectedRoutes() {
@@ -43,6 +44,7 @@ function ProtectedRoutes() {
           <Route path="/nodes" element={<Nodes />} />
           <Route path="/secrets" element={<Secrets />} />
           <Route path="/integrations" element={<Integrations />} />
+          <Route path="/clusters" element={<Clusters />} />
           <Route path="/clusters/:id" element={<ClusterDetail />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

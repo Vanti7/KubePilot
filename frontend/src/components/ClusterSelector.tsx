@@ -4,12 +4,12 @@ import { ChevronDown, Wifi, WifiOff, AlertTriangle } from 'lucide-react'
 import clsx from 'clsx'
 import { useClusters } from '../hooks/useClusters'
 import { useClusterContext } from '../contexts/ClusterContext'
-import type { ClusterStatus } from '../types'
 
-const statusDot: Record<ClusterStatus, { icon: React.ReactNode; color: string }> = {
+const statusDot: Record<string, { icon: React.ReactNode; color: string }> = {
   healthy: { icon: <Wifi size={12} />, color: 'text-green-400' },
   unreachable: { icon: <WifiOff size={12} />, color: 'text-red-400' },
   degraded: { icon: <AlertTriangle size={12} />, color: 'text-yellow-400' },
+  unknown: { icon: <WifiOff size={12} />, color: 'text-slate-500' },
 }
 
 export function ClusterSelector() {
@@ -20,7 +20,10 @@ export function ClusterSelector() {
     selectedClusterIds.length === 0
       ? 'All clusters'
       : selectedClusterIds.length === 1
-      ? clusters.find((c) => c.id === selectedClusterIds[0])?.display_name || '1 cluster'
+      ? (() => {
+          const c = clusters.find((c) => c.id === selectedClusterIds[0])
+          return c?.display_name || c?.name || '1 cluster'
+        })()
       : `${selectedClusterIds.length} clusters`
 
   return (

@@ -11,12 +11,28 @@ export interface Environment {
   color: string
 }
 
+export type ClusterConnectionMode = 'kubeconfig' | 'incluster' | 'ssh'
+
 export interface Cluster {
   id: string
   name: string
-  display_name: string
-  endpoint: string
-  version: string
+  slug?: string
+  // Legacy/optional fields kept for backward compatibility with existing views.
+  display_name?: string
+  endpoint?: string
+  version?: string
+  provider?: string
+  region?: string
+  k8s_version?: string
+  api_endpoint?: string
+  tls_insecure?: boolean
+  // Connection mode and SSH parameters (ssh_password is never returned by the API).
+  connection_mode?: ClusterConnectionMode
+  ssh_host?: string
+  ssh_port?: number
+  ssh_user?: string
+  ssh_sudo?: boolean
+  ssh_kubeconfig_path?: string
   environment_id: string
   environment?: Environment
   last_seen_at: string

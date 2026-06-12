@@ -91,10 +91,10 @@ export function FindingDetail({ finding }: Props) {
         <div className="panel p-3 space-y-3">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Risk Score</div>
           <ScoreBar score={finding.risk_score.score} />
-          {Object.keys(finding.risk_score.factors).length > 0 && (
+          {Object.keys(finding.risk_score.factors ?? {}).length > 0 && (
             <table className="w-full text-xs">
               <tbody>
-                {Object.entries(finding.risk_score.factors).map(([factor, value]) => (
+                {Object.entries(finding.risk_score.factors ?? {}).map(([factor, value]) => (
                   <tr key={factor} className="border-t border-surface-border/50">
                     <td className="py-1.5 text-slate-400 capitalize">{factor.replace(/_/g, ' ')}</td>
                     <td className="py-1.5 text-right">

@@ -90,7 +90,7 @@ export function Secrets() {
 
   const treeNodes: TreeNode[] = clusters.map((c) => ({
     clusterId: c.id,
-    clusterName: c.display_name,
+    clusterName: c.display_name || c.name,
     namespaces: namespaces.filter((n) => n.cluster_id === c.id),
   }))
 

@@ -62,11 +62,11 @@ function WorkloadDetail({ workload }: { workload: Workload }) {
         </div>
       </div>
 
-      {Object.keys(workload.labels).length > 0 && (
+      {Object.keys(workload.labels ?? {}).length > 0 && (
         <div className="panel p-3 space-y-2">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Labels</div>
           <div className="flex flex-wrap gap-1">
-            {Object.entries(workload.labels).slice(0, 12).map(([k, v]) => (
+            {Object.entries(workload.labels ?? {}).slice(0, 12).map(([k, v]) => (
               <span key={k} className="px-1.5 py-0.5 rounded bg-surface-elevated border border-surface-border text-xs font-mono text-slate-400">
                 {k}={v}
               </span>
@@ -136,7 +136,7 @@ export function Inventory() {
 
   const treeNodes: TreeNode[] = clusters.map((c) => ({
     clusterId: c.id,
-    clusterName: c.display_name,
+    clusterName: c.display_name || c.name,
     namespaces: namespaces.filter((n) => n.cluster_id === c.id),
   }))
 

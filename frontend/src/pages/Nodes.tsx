@@ -97,7 +97,7 @@ function NodeDetail({ node }: { node: Node }) {
       <div className="grid grid-cols-2 gap-3">
         <div className="panel p-3 space-y-2">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Capacity</div>
-          {Object.entries(node.capacity).map(([k, v]) => (
+          {Object.entries(node.capacity ?? {}).map(([k, v]) => (
             <div key={k} className="flex justify-between text-xs">
               <span className="text-slate-500">{k}</span>
               <span className="font-mono text-slate-300">{v}</span>
@@ -106,7 +106,7 @@ function NodeDetail({ node }: { node: Node }) {
         </div>
         <div className="panel p-3 space-y-2">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Allocatable</div>
-          {Object.entries(node.allocatable).map(([k, v]) => (
+          {Object.entries(node.allocatable ?? {}).map(([k, v]) => (
             <div key={k} className="flex justify-between text-xs">
               <span className="text-slate-500">{k}</span>
               <span className="font-mono text-slate-300">{v}</span>
