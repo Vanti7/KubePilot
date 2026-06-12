@@ -21,6 +21,9 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Fixed
+- **Connexion SSH instable** : le `ssh.Client` était créé une seule fois ; dès que le tunnel tombait (blip réseau, coupure des connexions longues par un firewall), **tous** les appels K8s (watch + list) échouaient en boucle sans jamais se rétablir. Remplacé par un `sshTunnel` auto-réparant — keepalive `keepalive@openssh.com` toutes les 20 s pour éviter la coupure sur inactivité, et reconnexion automatique au prochain `Dial` quand la connexion est morte
+
 ## [0.2.0-alpha.1] — 2026-06-12
 
 > Mode local single-binary (SQLite + cache mémoire), serveur MCP, connexion cluster par SSH avec tunnel d'API,

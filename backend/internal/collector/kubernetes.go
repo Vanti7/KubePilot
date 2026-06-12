@@ -16,7 +16,6 @@ import (
 	"github.com/kubepilot/backend/internal/models"
 	"github.com/kubepilot/backend/internal/store"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/ssh"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,7 +34,7 @@ type KubernetesCollector struct {
 	logger    *zap.Logger
 	stopCh    chan struct{}
 	wg        sync.WaitGroup
-	sshClient *ssh.Client // non-nil only for ssh connection mode; closed on Stop
+	sshTunnel *sshTunnel // non-nil only for ssh connection mode; closed on Stop
 }
 
 // NewKubernetesCollector builds a KubernetesCollector for the given cluster model.
@@ -43,26 +42,31 @@ type KubernetesCollector struct {
 func NewKubernetesCollector(cluster *models.Cluster, s *store.Store, logger *zap.Logger) (*KubernetesCollector, error) {
 	var restConfig *rest.Config
 	var err error
-	var sshClient *ssh.Client
+	var tunnel *sshTunnel
 
 	if cluster.ConnectionMode == models.ClusterConnSSH || cluster.SSHHost != "" {
 		// SSH mode: connect to the node, read its kubeconfig, then tunnel all
-		// Kubernetes API traffic through the SSH connection.
-		sshClient, err = sshDialClient(cluster)
+		// Kubernetes API traffic through a self-healing SSH connection.
+		tunnel, err = newSSHTunnel(cluster, logger)
 		if err != nil {
 			return nil, fmt.Errorf("ssh connect for cluster %s: %w", cluster.ID, err)
 		}
-		kubeconfigBytes, kErr := fetchRemoteKubeconfig(sshClient, cluster)
+		client, cErr := tunnel.ensureClient()
+		if cErr != nil {
+			tunnel.Close()
+			return nil, fmt.Errorf("ssh client for cluster %s: %w", cluster.ID, cErr)
+		}
+		kubeconfigBytes, kErr := fetchRemoteKubeconfig(client, cluster)
 		if kErr != nil {
-			sshClient.Close()
+			tunnel.Close()
 			return nil, fmt.Errorf("fetch remote kubeconfig for cluster %s: %w", cluster.ID, kErr)
 		}
 		restConfig, err = clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
 		if err != nil {
-			sshClient.Close()
+			tunnel.Close()
 			return nil, fmt.Errorf("parse remote kubeconfig for cluster %s: %w", cluster.ID, err)
 		}
-		restConfig.Dial = sshTunnelDialer(sshClient)
+		restConfig.Dial = tunnel.Dial
 	} else if cluster.KubeconfigRef != "" {
 		// KubeconfigRef is treated as the literal kubeconfig content (base64-encoded or raw YAML).
 		raw, decErr := base64.StdEncoding.DecodeString(cluster.KubeconfigRef)
@@ -83,16 +87,16 @@ func NewKubernetesCollector(cluster *models.Cluster, s *store.Store, logger *zap
 	}
 
 	if err != nil {
-		if sshClient != nil {
-			sshClient.Close()
+		if tunnel != nil {
+			tunnel.Close()
 		}
 		return nil, fmt.Errorf("build rest config for cluster %s: %w", cluster.ID, err)
 	}
 
 	clientset, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
-		if sshClient != nil {
-			sshClient.Close()
+		if tunnel != nil {
+			tunnel.Close()
 		}
 		return nil, fmt.Errorf("create clientset for cluster %s: %w", cluster.ID, err)
 	}
@@ -103,7 +107,7 @@ func NewKubernetesCollector(cluster *models.Cluster, s *store.Store, logger *zap
 		store:     s,
 		logger:    logger.With(zap.String("cluster_id", cluster.ID.String()), zap.String("cluster_name", cluster.Name)),
 		stopCh:    make(chan struct{}),
-		sshClient: sshClient,
+		sshTunnel: tunnel,
 	}, nil
 }
 
@@ -509,8 +513,8 @@ func (kc *KubernetesCollector) waitBeforeRetry(ctx context.Context) bool {
 func (kc *KubernetesCollector) Stop() {
 	close(kc.stopCh)
 	kc.wg.Wait()
-	if kc.sshClient != nil {
-		_ = kc.sshClient.Close()
+	if kc.sshTunnel != nil {
+		_ = kc.sshTunnel.Close()
 	}
 }
 

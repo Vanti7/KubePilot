@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kubepilot/backend/internal/models"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -42,27 +44,120 @@ func sshDialClient(cluster *models.Cluster) (*ssh.Client, error) {
 	return client, nil
 }
 
+// sshTunnel manages a single, self-healing SSH connection used to tunnel
+// Kubernetes API traffic. The underlying *ssh.Client is recreated transparently
+// when it dies (network blip, idle timeout on a restrictive network, etc.), and
+// a keepalive keeps it from being reaped while idle between collection passes.
+type sshTunnel struct {
+	cluster *models.Cluster
+	logger  *zap.Logger
+
+	mu     sync.Mutex
+	client *ssh.Client
+}
+
+// newSSHTunnel establishes the initial SSH connection.
+func newSSHTunnel(cluster *models.Cluster, logger *zap.Logger) (*sshTunnel, error) {
+	t := &sshTunnel{cluster: cluster, logger: logger}
+	if _, err := t.ensureClient(); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// ensureClient returns a live client, dialing a new one (and starting its
+// keepalive loop) if none is currently held.
+func (t *sshTunnel) ensureClient() (*ssh.Client, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.client != nil {
+		return t.client, nil
+	}
+	c, err := sshDialClient(t.cluster)
+	if err != nil {
+		return nil, err
+	}
+	t.client = c
+	go t.keepAlive(c)
+	return c, nil
+}
+
+// invalidate drops the given client if it is still the active one, forcing the
+// next ensureClient call to reconnect.
+func (t *sshTunnel) invalidate(dead *ssh.Client) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.client == dead {
+		t.client = nil
+		_ = dead.Close()
+	}
+}
+
+// Dial routes a TCP connection through the SSH tunnel (matches rest.Config.Dial).
+// On failure it assumes the connection died, reconnects once and retries — so a
+// dropped tunnel recovers on the next client-go watch/list attempt instead of
+// failing forever.
+func (t *sshTunnel) Dial(_ context.Context, network, addr string) (net.Conn, error) {
+	client, err := t.ensureClient()
+	if err != nil {
+		return nil, err
+	}
+	conn, err := client.Dial(network, addr)
+	if err == nil {
+		return conn, nil
+	}
+
+	t.invalidate(client)
+	client, err2 := t.ensureClient()
+	if err2 != nil {
+		return nil, fmt.Errorf("ssh tunnel dial %s (reconnect failed: %v): %w", addr, err2, err)
+	}
+	return client.Dial(network, addr)
+}
+
+// keepAlive pings the SSH server periodically; on failure it invalidates the
+// client so the next Dial reconnects. The loop is tied to a specific client and
+// exits once that client is replaced.
+func (t *sshTunnel) keepAlive(client *ssh.Client) {
+	ticker := time.NewTicker(20 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		if _, _, err := client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+			t.logger.Warn("ssh keepalive failed; will reconnect on next use",
+				zap.String("ssh_host", t.cluster.SSHHost), zap.Error(err))
+			t.invalidate(client)
+			return
+		}
+	}
+}
+
+// Close tears down the active SSH connection.
+func (t *sshTunnel) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.client == nil {
+		return nil
+	}
+	err := t.client.Close()
+	t.client = nil
+	return err
+}
+
 // fetchRemoteKubeconfig reads the kubeconfig file from the node over SSH. If the
 // cluster has an explicit SSHKubeconfigPath it is used (shell-quoted); otherwise
 // the common candidate locations are tried in order.
 func fetchRemoteKubeconfig(client *ssh.Client, cluster *models.Cluster) ([]byte, error) {
-	type candidate struct {
-		expr string // path token already prepared for the shell
-	}
-
-	var candidates []candidate
+	var exprs []string
 	if cluster.SSHKubeconfigPath != "" {
-		candidates = append(candidates, candidate{expr: shellQuote(cluster.SSHKubeconfigPath)})
+		exprs = append(exprs, shellQuote(cluster.SSHKubeconfigPath))
 	} else {
-		for _, p := range defaultKubeconfigCandidates {
-			// Constant, trusted paths — left unquoted so `~` expands on the node.
-			candidates = append(candidates, candidate{expr: p})
-		}
+		// Constant, trusted paths — left unquoted so `~` expands on the node.
+		exprs = append(exprs, defaultKubeconfigCandidates...)
 	}
 
 	var lastErr error
-	for _, c := range candidates {
-		data, err := sshReadFile(client, c.expr, cluster.SSHSudo, cluster.SSHPassword)
+	for _, expr := range exprs {
+		data, err := sshReadFile(client, expr, cluster.SSHSudo, cluster.SSHPassword)
 		if err == nil && len(bytes.TrimSpace(data)) > 0 {
 			return data, nil
 		}
@@ -100,15 +195,6 @@ func sshReadFile(client *ssh.Client, pathExpr string, useSudo bool, password str
 		return nil, fmt.Errorf("run %q: %w (stderr: %s)", cmd, err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
-}
-
-// sshTunnelDialer returns a dialer (matching rest.Config.Dial) that routes every
-// TCP connection through the SSH client. This lets client-go reach an API server
-// address (e.g. 127.0.0.1:6443) that is only resolvable from the node itself.
-func sshTunnelDialer(client *ssh.Client) func(ctx context.Context, network, addr string) (net.Conn, error) {
-	return func(_ context.Context, network, addr string) (net.Conn, error) {
-		return client.Dial(network, addr)
-	}
 }
 
 // shellQuote wraps s in single quotes, escaping any embedded single quotes.
