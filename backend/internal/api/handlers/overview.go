@@ -34,8 +34,11 @@ type ClusterStatusCount struct {
 type FindingsPerCluster struct {
 	ClusterID   string `json:"cluster_id"`
 	ClusterName string `json:"cluster_name"`
+	Status      string `json:"status"`
 	Open        int64  `json:"open"`
 	Critical    int64  `json:"critical"`
+	High        int64  `json:"high"`
+	Medium      int64  `json:"medium"`
 }
 
 // DataFreshness tracks when a cluster was last seen.
@@ -47,6 +50,13 @@ type DataFreshness struct {
 	Status      string     `json:"status"`
 }
 
+// ClusterResources is a per-cluster resource summary for the dashboard.
+type ClusterResources struct {
+	ClusterID   string `json:"cluster_id"`
+	ClusterName string `json:"cluster_name"`
+	store.SystemResourceSummary
+}
+
 // OverviewResponse is the full dashboard payload.
 type OverviewResponse struct {
 	ClusterStatus     ClusterStatusCount   `json:"cluster_status"`
@@ -54,6 +64,8 @@ type OverviewResponse struct {
 	FindingsPerCluster []FindingsPerCluster `json:"findings_per_cluster"`
 	TopFindings       []store.FindingWithScore `json:"top_findings"`
 	DataFreshness     []DataFreshness      `json:"data_freshness"`
+	SystemResources    store.SystemResourceSummary `json:"system_resources"`
+	ResourcesPerCluster []ClusterResources         `json:"resources_per_cluster"`
 	GeneratedAt       time.Time            `json:"generated_at"`
 }
 
@@ -105,8 +117,11 @@ func (h *OverviewHandler) GetOverview(c *gin.Context) {
 		findingsPerCluster = append(findingsPerCluster, FindingsPerCluster{
 			ClusterID:   cl.ID.String(),
 			ClusterName: cl.Name,
+			Status:      string(cl.Status),
 			Open:        s.Total,
 			Critical:    s.Critical,
+			High:        s.High,
+			Medium:      s.Medium,
 		})
 	}
 
@@ -138,12 +153,35 @@ func (h *OverviewHandler) GetOverview(c *gin.Context) {
 		freshness = append(freshness, df)
 	}
 
+	// Cluster-wide system resources (capacity vs live usage), global + per-cluster.
+	systemResources, err := h.store.SystemResources(ctx, "")
+	if err != nil {
+		h.logger.Error("overview: system resources", zap.Error(err))
+		systemResources = store.SystemResourceSummary{}
+	}
+
+	resourcesPerCluster := make([]ClusterResources, 0, len(clusters))
+	for _, cl := range clusters {
+		res, err := h.store.SystemResources(ctx, cl.ID.String())
+		if err != nil {
+			h.logger.Warn("overview: per-cluster resources", zap.String("cluster", cl.Name), zap.Error(err))
+			continue
+		}
+		resourcesPerCluster = append(resourcesPerCluster, ClusterResources{
+			ClusterID:             cl.ID.String(),
+			ClusterName:           cl.Name,
+			SystemResourceSummary: res,
+		})
+	}
+
 	c.JSON(http.StatusOK, OverviewResponse{
-		ClusterStatus:      clusterStatus,
-		FindingsSummary:    summary,
-		FindingsPerCluster: findingsPerCluster,
-		TopFindings:        topFindings,
-		DataFreshness:      freshness,
-		GeneratedAt:        now,
+		ClusterStatus:       clusterStatus,
+		FindingsSummary:     summary,
+		FindingsPerCluster:  findingsPerCluster,
+		TopFindings:         topFindings,
+		DataFreshness:       freshness,
+		SystemResources:     systemResources,
+		ResourcesPerCluster: resourcesPerCluster,
+		GeneratedAt:         now,
 	})
 }

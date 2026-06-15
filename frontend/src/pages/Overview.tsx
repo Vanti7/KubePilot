@@ -1,12 +1,69 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Wifi, WifiOff, AlertTriangle } from 'lucide-react'
+import { RefreshCw } from 'lucide-react'
 import clsx from 'clsx'
 import { getOverview } from '../api/client'
 import { SeverityBadge } from '../components/SeverityBadge'
+import { ClusterStatusBadge } from '../components/ClusterStatusBadge'
 import { DataTable, Column } from '../components/DataTable'
-import type { UpdateFinding } from '../types'
+import type { UpdateFinding, ClusterResources, ClusterStatus } from '../types'
 import { formatAge, formatRelative, scoreToColor } from '../utils/formatting'
+
+function bytesToHuman(n: number): string {
+  const gib = n / 1024 ** 3
+  if (gib >= 1024) return `${(gib / 1024).toFixed(1)} TiB`
+  if (gib >= 1) return `${gib.toFixed(1)} GiB`
+  return `${(n / 1024 ** 2).toFixed(0)} MiB`
+}
+
+function usageColor(pct: number): string {
+  return pct >= 85 ? '#f87171' : pct >= 60 ? '#fbbf24' : '#34d399'
+}
+
+// ResourceGauge is a Proxmox/vCenter-style radial gauge for a usage percentage.
+function ResourceGauge({ label, percent, detail }: { label: string; percent: number; detail: string }) {
+  const r = 34
+  const circ = 2 * Math.PI * r
+  const pct = Math.min(Math.max(percent, 0), 100)
+  const offset = circ * (1 - pct / 100)
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div className="relative w-24 h-24">
+        <svg viewBox="0 0 80 80" className="w-24 h-24 -rotate-90">
+          <circle cx="40" cy="40" r={r} fill="none" stroke="#1e293b" strokeWidth="8" />
+          <circle
+            cx="40"
+            cy="40"
+            r={r}
+            fill="none"
+            stroke={usageColor(pct)}
+            strokeWidth="8"
+            strokeDasharray={circ}
+            strokeDashoffset={offset}
+            strokeLinecap="round"
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-lg font-bold font-mono text-slate-100">{pct.toFixed(0)}%</span>
+        </div>
+      </div>
+      <div className="text-xs font-medium text-slate-300">{label}</div>
+      <div className="text-xs text-slate-500 font-mono">{detail}</div>
+    </div>
+  )
+}
+
+function MiniBar({ percent }: { percent: number }) {
+  const color = percent >= 85 ? 'bg-red-400' : percent >= 60 ? 'bg-yellow-400' : 'bg-green-400'
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden min-w-[50px]">
+        <div className={clsx('h-full rounded-full', color)} style={{ width: `${Math.min(percent, 100)}%` }} />
+      </div>
+      <span className="text-xs font-mono text-slate-400 w-9 text-right">{percent.toFixed(0)}%</span>
+    </div>
+  )
+}
 
 function StatCard({
   label,
@@ -28,18 +85,6 @@ function StatCard({
       {sublabel && <div className="text-xs text-slate-600">{sublabel}</div>}
     </div>
   )
-}
-
-const clusterStatusIcon = {
-  healthy: <Wifi size={13} className="text-green-400" />,
-  unreachable: <WifiOff size={13} className="text-red-400" />,
-  degraded: <AlertTriangle size={13} className="text-yellow-400" />,
-}
-
-const clusterStatusColor = {
-  healthy: 'text-green-400',
-  unreachable: 'text-red-400',
-  degraded: 'text-yellow-400',
 }
 
 export function Overview() {
@@ -105,43 +150,31 @@ export function Overview() {
   type ClusterRow = {
     id: string
     name: string
-    display_name: string
-    environment?: { name: string; color: string }
-    status: 'healthy' | 'unreachable' | 'degraded'
-    version: string
-    last_seen_at: string
-    counts: Record<string, number>
+    status: ClusterStatus
+    critical: number
+    high: number
+    medium: number
   }
 
   const clusterRows: ClusterRow[] = (data?.findings_per_cluster || []).map((c) => ({
     id: c.cluster_id,
     name: c.cluster_name,
-    display_name: c.cluster_name,
-    status: 'healthy' as const,
-    version: '',
-    last_seen_at: '',
-    counts: { critical: c.critical, high: 0, medium: 0 },
+    status: c.status,
+    critical: c.critical,
+    high: c.high,
+    medium: c.medium,
   }))
 
   const clusterColumns: Column<ClusterRow>[] = [
     {
       key: 'name',
       header: 'Cluster',
-      render: (r) => (
-        <div className="flex items-center gap-2">
-          {clusterStatusIcon[r.status]}
-          <span className="text-xs font-medium text-slate-200">{r.display_name}</span>
-        </div>
-      ),
+      render: (r) => <span className="text-xs font-medium text-slate-200">{r.name}</span>,
     },
     {
       key: 'status',
       header: 'Status',
-      render: (r) => (
-        <span className={clsx('text-xs font-medium capitalize', clusterStatusColor[r.status])}>
-          {r.status}
-        </span>
-      ),
+      render: (r) => <ClusterStatusBadge status={r.status} />,
     },
     {
       key: 'critical',
@@ -149,8 +182,8 @@ export function Overview() {
       width: '70px',
       align: 'right',
       render: (r) => (
-        <span className={clsx('text-xs font-mono', r.counts.critical > 0 ? 'text-red-400' : 'text-slate-600')}>
-          {r.counts.critical || 0}
+        <span className={clsx('text-xs font-mono', r.critical > 0 ? 'text-red-400' : 'text-slate-600')}>
+          {r.critical || 0}
         </span>
       ),
     },
@@ -160,8 +193,8 @@ export function Overview() {
       width: '60px',
       align: 'right',
       render: (r) => (
-        <span className={clsx('text-xs font-mono', r.counts.high > 0 ? 'text-orange-400' : 'text-slate-600')}>
-          {r.counts.high || 0}
+        <span className={clsx('text-xs font-mono', r.high > 0 ? 'text-orange-400' : 'text-slate-600')}>
+          {r.high || 0}
         </span>
       ),
     },
@@ -171,12 +204,58 @@ export function Overview() {
       width: '60px',
       align: 'right',
       render: (r) => (
-        <span className={clsx('text-xs font-mono', r.counts.medium > 0 ? 'text-yellow-400' : 'text-slate-600')}>
-          {r.counts.medium || 0}
+        <span className={clsx('text-xs font-mono', r.medium > 0 ? 'text-yellow-400' : 'text-slate-600')}>
+          {r.medium || 0}
         </span>
       ),
     },
   ]
+
+  const resourceColumns: Column<ClusterResources>[] = [
+    {
+      key: 'cluster',
+      header: 'Cluster',
+      render: (r) => <span className="text-xs font-medium text-slate-200">{r.cluster_name}</span>,
+    },
+    {
+      key: 'nodes',
+      header: 'Nodes',
+      width: '80px',
+      render: (r) => (
+        <span className="text-xs font-mono text-slate-400">
+          {r.nodes_ready}/{r.nodes}
+        </span>
+      ),
+    },
+    {
+      key: 'cpu',
+      header: 'CPU',
+      width: '130px',
+      render: (r) => <MiniBar percent={r.cpu_usage_percent} />,
+    },
+    {
+      key: 'memory',
+      header: 'Memory',
+      width: '130px',
+      render: (r) => <MiniBar percent={r.memory_usage_percent} />,
+    },
+    {
+      key: 'disk',
+      header: 'Disk',
+      width: '130px',
+      render: (r) => <MiniBar percent={r.disk_usage_percent} />,
+    },
+    {
+      key: 'pods',
+      header: 'Pods',
+      width: '60px',
+      align: 'right',
+      render: (r) => <span className="text-xs font-mono text-slate-400">{r.pods_running}</span>,
+    },
+  ]
+
+  const sys = data?.system_resources
+  const perCluster = data?.resources_per_cluster ?? []
 
   const lastUpdated = dataUpdatedAt ? formatRelative(new Date(dataUpdatedAt).toISOString()) : null
 
@@ -223,6 +302,45 @@ export function Overview() {
           sublabel="open findings"
         />
       </div>
+
+      {/* System resources (cluster-wide capacity vs live usage) */}
+      {sys && sys.nodes > 0 && (
+        <div className="panel">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-surface-border">
+            <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+              System Resources
+            </h2>
+            <span className="text-xs text-slate-500 font-mono">
+              {sys.nodes_ready}/{sys.nodes} nodes ready · {sys.pods_running} pods
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 p-4">
+            <ResourceGauge
+              label="CPU"
+              percent={sys.cpu_usage_percent}
+              detail={`${sys.cpu_used_cores.toFixed(1)} / ${sys.cpu_capacity_cores.toFixed(0)} cores`}
+            />
+            <ResourceGauge
+              label="Memory"
+              percent={sys.memory_usage_percent}
+              detail={`${bytesToHuman(sys.memory_used_bytes)} / ${bytesToHuman(sys.memory_capacity_bytes)}`}
+            />
+            <ResourceGauge
+              label="Disk"
+              percent={sys.disk_usage_percent}
+              detail={`${bytesToHuman(sys.disk_used_bytes)} / ${bytesToHuman(sys.disk_capacity_bytes)}`}
+            />
+          </div>
+          {perCluster.length > 1 && (
+            <DataTable
+              columns={resourceColumns}
+              data={perCluster}
+              rowKey={(r) => r.cluster_id}
+              onRowClick={(r) => navigate(`/clusters/${r.cluster_id}`)}
+            />
+          )}
+        </div>
+      )}
 
       {/* Top critical findings */}
       <div className="panel">

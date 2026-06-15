@@ -1,23 +1,19 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, RefreshCw, Wifi, WifiOff, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, RefreshCw } from 'lucide-react'
 import clsx from 'clsx'
 import { getCluster, syncCluster, getFindings } from '../api/client'
 import { SeverityBadge } from '../components/SeverityBadge'
+import { ClusterStatusIcon } from '../components/ClusterStatusBadge'
 import { DataTable, Column } from '../components/DataTable'
 import type { UpdateFinding } from '../types'
 import { formatAge, formatRelative, scoreToColor } from '../utils/formatting'
-
-const STATUS_ICON = {
-  healthy: <Wifi size={14} className="text-green-400" />,
-  unreachable: <WifiOff size={14} className="text-red-400" />,
-  degraded: <AlertTriangle size={14} className="text-yellow-400" />,
-}
 
 const STATUS_COLOR = {
   healthy: 'text-green-400',
   unreachable: 'text-red-400',
   degraded: 'text-yellow-400',
+  unknown: 'text-slate-500',
 }
 
 export function ClusterDetail() {
@@ -115,7 +111,7 @@ export function ClusterDetail() {
           <ArrowLeft size={16} />
         </button>
         <div className="flex items-center gap-2">
-          {STATUS_ICON[cluster.status]}
+          <ClusterStatusIcon status={cluster.status} size={14} />
           <h1 className="text-base font-semibold text-slate-100">{cluster.display_name}</h1>
           <span className={clsx('text-xs capitalize', STATUS_COLOR[cluster.status])}>{cluster.status}</span>
         </div>

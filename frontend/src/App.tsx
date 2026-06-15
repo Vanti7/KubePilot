@@ -5,6 +5,7 @@ import { Layout } from './components/Layout'
 import { LoginPage } from './pages/Login'
 import { Overview } from './pages/Overview'
 import { Updates } from './pages/Updates'
+import { Risks } from './pages/Risks'
 import { Inventory } from './pages/Inventory'
 import { HelmPage } from './pages/HelmPage'
 import { Nodes } from './pages/Nodes'
@@ -39,6 +40,7 @@ function ProtectedRoutes() {
         <Route element={<Layout />}>
           <Route path="/" element={<Overview />} />
           <Route path="/updates" element={<Updates />} />
+          <Route path="/risks" element={<Risks />} />
           <Route path="/inventory" element={<Inventory />} />
           <Route path="/helm" element={<HelmPage />} />
           <Route path="/nodes" element={<Nodes />} />

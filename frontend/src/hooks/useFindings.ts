@@ -17,7 +17,7 @@ export function useFindingSummary() {
   })
 }
 
-interface FindingsFilterState {
+export interface FindingsFilterState {
   severities: Severity[]
   statuses: FindingStatus[]
   updateTypes: UpdateType[]
@@ -29,7 +29,7 @@ interface FindingsFilterState {
   sortDir: 'asc' | 'desc'
 }
 
-export function useFindingsFilter() {
+export function useFindingsFilter(initial?: Partial<FindingsFilterState>) {
   const [filter, setFilter] = useState<FindingsFilterState>({
     severities: [],
     statuses: ['open'],
@@ -40,6 +40,7 @@ export function useFindingsFilter() {
     pageSize: 50,
     sortBy: 'score',
     sortDir: 'desc',
+    ...initial,
   })
 
   const apiFilter: FindingFilter = {

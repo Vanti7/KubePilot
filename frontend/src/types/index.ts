@@ -1,7 +1,7 @@
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info'
 export type FindingStatus = 'open' | 'planned' | 'ignored' | 'approved' | 'blocked' | 'resolved'
 export type UpdateType = 'patch' | 'minor' | 'major' | 'unknown'
-export type ClusterStatus = 'healthy' | 'unreachable' | 'degraded'
+export type ClusterStatus = 'healthy' | 'unreachable' | 'degraded' | 'unknown'
 
 export interface Environment {
   id: string
@@ -58,7 +58,41 @@ export interface Node {
   capacity: Record<string, string>
   allocatable: Record<string, string>
   conditions: NodeCondition[]
+  metrics?: NodeMetricSnapshot
   last_seen_at: string
+}
+
+// Latest usage snapshot embedded in the node list.
+export interface NodeMetricSnapshot {
+  timestamp: string
+  cpu_usage_percent: number
+  memory_usage_percent: number
+  fs_used_percent: number
+  network_rx_rate: number
+  network_tx_rate: number
+  pods_running: number
+}
+
+// A full point in a node's usage time-series (GET /nodes/:id/metrics).
+export interface NodeMetric {
+  id: string
+  cluster_id: string
+  node_id: string
+  node_name: string
+  timestamp: string
+  cpu_usage_nano_cores: number
+  cpu_usage_percent: number
+  memory_working_set_bytes: number
+  memory_usage_bytes: number
+  memory_usage_percent: number
+  fs_used_bytes: number
+  fs_capacity_bytes: number
+  fs_used_percent: number
+  network_rx_bytes: number
+  network_tx_bytes: number
+  network_rx_rate: number
+  network_tx_rate: number
+  pods_running: number
 }
 
 export interface NodeCondition {
@@ -151,8 +185,11 @@ export interface FindingSummary {
 export interface FindingsPerCluster {
   cluster_id: string
   cluster_name: string
+  status: ClusterStatus
   open: number
   critical: number
+  high: number
+  medium: number
 }
 
 export interface OverviewData {
@@ -173,7 +210,30 @@ export interface OverviewData {
     age_seconds: number
     status: string
   }>
+  system_resources: SystemResources
+  resources_per_cluster: ClusterResources[]
   generated_at: string
+}
+
+// Cluster-wide capacity vs live usage (dashboard system view).
+export interface SystemResources {
+  nodes: number
+  nodes_ready: number
+  pods_running: number
+  cpu_capacity_cores: number
+  cpu_used_cores: number
+  cpu_usage_percent: number
+  memory_capacity_bytes: number
+  memory_used_bytes: number
+  memory_usage_percent: number
+  disk_capacity_bytes: number
+  disk_used_bytes: number
+  disk_usage_percent: number
+}
+
+export interface ClusterResources extends SystemResources {
+  cluster_id: string
+  cluster_name: string
 }
 
 export interface PaginatedResponse<T> {
