@@ -2,12 +2,110 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Filter } from 'lucide-react'
 import clsx from 'clsx'
-import { getNodes } from '../api/client'
+import { getNodes, getNodeMetrics } from '../api/client'
 import { useClusters } from '../hooks/useClusters'
 import { DataTable, Column } from '../components/DataTable'
 import { SlideOver } from '../components/SlideOver'
-import type { Node, NodeCondition } from '../types'
+import type { Node, NodeCondition, NodeMetric } from '../types'
 import { formatAge } from '../utils/formatting'
+
+function formatRate(bytesPerSec: number): string {
+  if (!bytesPerSec || bytesPerSec < 1) return '0 B/s'
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s']
+  let v = bytesPerSec
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+// UsageBar renders a compact horizontal gauge for a percentage value, colored by
+// threshold. Renders a dash when the value is unavailable (no metrics yet).
+function UsageBar({ percent, label }: { percent?: number; label: string }) {
+  if (percent == null) return <span className="text-xs text-slate-600">—</span>
+  const color = percent >= 85 ? 'bg-red-400' : percent >= 60 ? 'bg-yellow-400' : 'bg-green-400'
+  return (
+    <div className="flex items-center gap-2" title={`${label}: ${percent.toFixed(0)}%`}>
+      <div className="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden min-w-[36px]">
+        <div className={clsx('h-full rounded-full', color)} style={{ width: `${Math.min(percent, 100)}%` }} />
+      </div>
+      <span className="text-xs font-mono text-slate-400 w-8 text-right">{percent.toFixed(0)}%</span>
+    </div>
+  )
+}
+
+// Sparkline draws a normalized polyline over the given series, no charting lib.
+function Sparkline({ values, color }: { values: number[]; color: string }) {
+  if (values.length < 2) return <div className="h-10 flex items-center text-xs text-slate-600">Not enough data</div>
+  const w = 240
+  const h = 40
+  const pad = 2
+  const max = Math.max(...values)
+  const min = Math.min(...values)
+  const range = max - min || 1
+  const pts = values
+    .map((v, i) => {
+      const x = pad + (i / (values.length - 1)) * (w - 2 * pad)
+      const y = h - pad - ((v - min) / range) * (h - 2 * pad)
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-10" preserveAspectRatio="none">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
+
+function MetricRow({ label, value, values, color }: { label: string; value: string; values: number[]; color: string }) {
+  return (
+    <div>
+      <div className="flex justify-between text-xs mb-0.5">
+        <span className="text-slate-500">{label}</span>
+        <span className="font-mono text-slate-300">{value}</span>
+      </div>
+      <Sparkline values={values} color={color} />
+    </div>
+  )
+}
+
+// NodeMetricsPanel fetches and renders the node's recent usage time-series.
+function NodeMetricsPanel({ nodeId }: { nodeId: string }) {
+  const { data: metrics = [] } = useQuery({
+    queryKey: ['node-metrics', nodeId],
+    queryFn: () => getNodeMetrics(nodeId, '6h'),
+    refetchInterval: 30000,
+  })
+
+  if (metrics.length === 0) {
+    return (
+      <div className="panel p-3">
+        <div className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Metrics</div>
+        <div className="text-xs text-slate-600">No metrics collected yet.</div>
+      </div>
+    )
+  }
+
+  const last = metrics[metrics.length - 1]
+  const series = (key: keyof NodeMetric) => metrics.map((m) => Number(m[key]) || 0)
+
+  return (
+    <div className="panel p-3 space-y-3">
+      <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Metrics (6h)</div>
+      <MetricRow label="CPU" value={`${last.cpu_usage_percent.toFixed(0)}%`} values={series('cpu_usage_percent')} color="#34d399" />
+      <MetricRow label="Memory" value={`${last.memory_usage_percent.toFixed(0)}%`} values={series('memory_usage_percent')} color="#60a5fa" />
+      <MetricRow label="Disk" value={`${last.fs_used_percent.toFixed(0)}%`} values={series('fs_used_percent')} color="#fbbf24" />
+      <MetricRow label="Net In" value={formatRate(last.network_rx_rate)} values={series('network_rx_rate')} color="#a78bfa" />
+      <MetricRow label="Net Out" value={formatRate(last.network_tx_rate)} values={series('network_tx_rate')} color="#f472b6" />
+      <div className="flex justify-between text-xs pt-1">
+        <span className="text-slate-500">Pods running</span>
+        <span className="font-mono text-slate-300">{last.pods_running}</span>
+      </div>
+    </div>
+  )
+}
 
 function NodeRoleBadge({ role }: { role: string }) {
   const isControl = role === 'control-plane' || role === 'master'
@@ -94,6 +192,8 @@ function NodeDetail({ node }: { node: Node }) {
         </div>
       </div>
 
+      <NodeMetricsPanel nodeId={node.id} />
+
       <div className="grid grid-cols-2 gap-3">
         <div className="panel p-3 space-y-2">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Capacity</div>
@@ -132,6 +232,7 @@ export function Nodes() {
         role: roleFilter || undefined,
         limit: 200,
       }),
+    refetchInterval: 30000,
   })
 
   const nodes = data?.data ?? []
@@ -167,6 +268,24 @@ export function Nodes() {
       key: 'runtime',
       header: 'Runtime',
       render: (n) => <span className="font-mono text-xs text-slate-400">{n.container_runtime}</span>,
+    },
+    {
+      key: 'cpu',
+      header: 'CPU',
+      width: '110px',
+      render: (n) => <UsageBar percent={n.metrics?.cpu_usage_percent} label="CPU" />,
+    },
+    {
+      key: 'mem',
+      header: 'Memory',
+      width: '110px',
+      render: (n) => <UsageBar percent={n.metrics?.memory_usage_percent} label="Memory" />,
+    },
+    {
+      key: 'disk',
+      header: 'Disk',
+      width: '110px',
+      render: (n) => <UsageBar percent={n.metrics?.fs_used_percent} label="Disk" />,
     },
     {
       key: 'status',

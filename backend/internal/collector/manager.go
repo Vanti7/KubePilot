@@ -9,20 +9,29 @@ import (
 	"go.uber.org/zap"
 )
 
+// MetricsConfig controls node-metrics collection behaviour, shared by every
+// collector the manager spawns.
+type MetricsConfig struct {
+	Enabled   bool
+	Retention time.Duration
+}
+
 // CollectorManager starts and stops KubernetesCollectors as clusters are added/removed.
 type CollectorManager struct {
 	store      *store.Store
 	logger     *zap.Logger
+	metrics    MetricsConfig
 	collectors map[string]*KubernetesCollector
 	mu         sync.Mutex
 	stopCh     chan struct{}
 }
 
 // NewCollectorManager creates a new CollectorManager.
-func NewCollectorManager(s *store.Store, logger *zap.Logger) *CollectorManager {
+func NewCollectorManager(s *store.Store, logger *zap.Logger, metrics MetricsConfig) *CollectorManager {
 	return &CollectorManager{
 		store:      s,
 		logger:     logger,
+		metrics:    metrics,
 		collectors: make(map[string]*KubernetesCollector),
 		stopCh:     make(chan struct{}),
 	}
@@ -51,7 +60,7 @@ func (m *CollectorManager) SyncClusters(ctx context.Context) {
 
 		// Start a new collector for this cluster.
 		cl := cl // capture loop var
-		kc, err := NewKubernetesCollector(&cl, m.store, m.logger)
+		kc, err := NewKubernetesCollector(&cl, m.store, m.logger, m.metrics)
 		if err != nil {
 			m.logger.Error("create collector",
 				zap.String("cluster_id", idStr),

@@ -42,13 +42,37 @@ type nodeDTO struct {
 	Labels           datatypes.JSON    `json:"labels,omitempty"`
 	Taints           datatypes.JSON    `json:"taints,omitempty"`
 	Conditions       datatypes.JSON    `json:"conditions,omitempty"`
+	Metrics          *nodeMetricDTO    `json:"metrics,omitempty"`
 	LastSeenAt       time.Time         `json:"last_seen_at"`
 	CreatedAt        time.Time         `json:"created_at"`
 	UpdatedAt        time.Time         `json:"updated_at"`
 }
 
-func nodeToDTO(n models.Node) nodeDTO {
-	return nodeDTO{
+// nodeMetricDTO is the latest usage snapshot embedded in the node list.
+type nodeMetricDTO struct {
+	Timestamp          time.Time `json:"timestamp"`
+	CPUUsagePercent    float64   `json:"cpu_usage_percent"`
+	MemoryUsagePercent float64   `json:"memory_usage_percent"`
+	FSUsedPercent      float64   `json:"fs_used_percent"`
+	NetworkRxRate      float64   `json:"network_rx_rate"`
+	NetworkTxRate      float64   `json:"network_tx_rate"`
+	PodsRunning        int       `json:"pods_running"`
+}
+
+func metricToDTO(m models.NodeMetric) *nodeMetricDTO {
+	return &nodeMetricDTO{
+		Timestamp:          m.Timestamp,
+		CPUUsagePercent:    m.CPUUsagePercent,
+		MemoryUsagePercent: m.MemoryUsagePercent,
+		FSUsedPercent:      m.FSUsedPercent,
+		NetworkRxRate:      m.NetworkRxRate,
+		NetworkTxRate:      m.NetworkTxRate,
+		PodsRunning:        m.PodsRunning,
+	}
+}
+
+func nodeToDTO(n models.Node, metric *nodeMetricDTO) nodeDTO {
+	dto := nodeDTO{
 		ID:               n.ID.String(),
 		ClusterID:        n.ClusterID.String(),
 		Name:             n.Name,
@@ -71,10 +95,12 @@ func nodeToDTO(n models.Node) nodeDTO {
 		Labels:     n.Labels,
 		Taints:     n.Taints,
 		Conditions: n.Conditions,
+		Metrics:    metric,
 		LastSeenAt: n.UpdatedAt,
 		CreatedAt:  n.CreatedAt,
 		UpdatedAt:  n.UpdatedAt,
 	}
+	return dto
 }
 
 // ListNodes returns all nodes, optionally filtered by cluster.
@@ -89,9 +115,20 @@ func (h *NodeHandler) ListNodes(c *gin.Context) {
 		return
 	}
 
+	// Latest usage snapshot per node, loaded in one query to avoid N+1.
+	latest, err := h.store.LatestNodeMetricsByCluster(c.Request.Context(), clusterID)
+	if err != nil {
+		h.logger.Error("latest node metrics", zap.Error(err))
+		latest = nil // degrade gracefully: serve nodes without metrics
+	}
+
 	out := make([]nodeDTO, len(nodes))
 	for i, n := range nodes {
-		out[i] = nodeToDTO(n)
+		var metric *nodeMetricDTO
+		if m, ok := latest[n.ID.String()]; ok {
+			metric = metricToDTO(m)
+		}
+		out[i] = nodeToDTO(n, metric)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out, "total": len(out)})
 }
@@ -112,5 +149,29 @@ func (h *NodeHandler) GetNode(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, nodeToDTO(*node))
+	c.JSON(http.StatusOK, nodeToDTO(*node, nil))
+}
+
+// GetNodeMetrics returns a node's usage time-series since the given window.
+// GET /api/v1/nodes/:id/metrics?since=<RFC3339|duration> (default: last 1h)
+func (h *NodeHandler) GetNodeMetrics(c *gin.Context) {
+	id := c.Param("id")
+
+	since := time.Now().Add(-time.Hour)
+	if raw := c.Query("since"); raw != "" {
+		if t, err := time.Parse(time.RFC3339, raw); err == nil {
+			since = t
+		} else if d, err := time.ParseDuration(raw); err == nil {
+			since = time.Now().Add(-d)
+		}
+	}
+
+	metrics, err := h.store.ListNodeMetrics(c.Request.Context(), id, since)
+	if err != nil {
+		h.logger.Error("list node metrics", zap.String("id", id), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list node metrics"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": metrics, "total": len(metrics)})
 }

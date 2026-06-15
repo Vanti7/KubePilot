@@ -24,6 +24,12 @@ type Config struct {
 	HeadlampURL     string
 	TLSInsecure     bool
 
+	// Node metrics — collected from the kubelet Summary API on each collection pass.
+	// NodeMetricsEnabled toggles collection; NodeMetricsRetentionHours bounds how
+	// long time-series samples are kept before being purged.
+	NodeMetricsEnabled        bool
+	NodeMetricsRetentionHours int
+
 	// Storage backend selection.
 	// StorageDriver is "postgres" or "sqlite". CacheDriver is "redis" or "memory".
 	// When unset, sensible defaults are derived from LocalMode / DB_URL (see Load).
@@ -62,22 +68,35 @@ type Config struct {
 	// When InCluster=true the backend auto-registers its own cluster using the pod's SA token.
 	InCluster   bool
 	ClusterName string // human name for the auto-registered local cluster (default: "local")
+
+	// DemoMode seeds a realistic multi-cluster dataset (clusters, nodes, metrics,
+	// workloads, helm releases, findings) and disables the live collectors/watchers
+	// so the seeded data is not overwritten. For demos and screenshots.
+	DemoMode bool
 }
 
 // Load reads configuration from environment variables, applying defaults where appropriate.
 func Load() *Config {
 	local := getBoolEnv("LOCAL_MODE", false)
+	demo := getBoolEnv("DEMO_MODE", false)
 	dbURL := getEnv("DB_URL", "")
 
 	// Derive storage driver: explicit STORAGE_DRIVER wins; otherwise SQLite in
-	// local mode or when no DB_URL is provided, else PostgreSQL.
+	// local/demo mode or when no DB_URL is provided, else PostgreSQL.
 	storageDriver := getEnv("STORAGE_DRIVER", "")
 	if storageDriver == "" {
-		if local || dbURL == "" {
+		if local || demo || dbURL == "" {
 			storageDriver = StorageDriverSQLite
 		} else {
 			storageDriver = StorageDriverPostgres
 		}
+	}
+
+	// In demo mode, default to a known admin password so the operator can log in
+	// without scraping generated credentials from the logs.
+	adminPassword := getEnv("ADMIN_PASSWORD", "")
+	if demo && adminPassword == "" {
+		adminPassword = "demo"
 	}
 
 	// Derive cache driver: in-memory whenever we are not on PostgreSQL+Redis.
@@ -99,6 +118,8 @@ func Load() *Config {
 		HeadlampURL:    getEnv("HEADLAMP_URL", ""),
 		TLSInsecure:    getBoolEnv("TLS_INSECURE", false),
 		WorkerInterval: getIntEnv("WORKER_INTERVAL_SECONDS", 300),
+		NodeMetricsEnabled:        getBoolEnv("NODE_METRICS_ENABLED", true),
+		NodeMetricsRetentionHours: getIntEnv("NODE_METRICS_RETENTION_HOURS", 168),
 		StorageDriver:  storageDriver,
 		SQLitePath:     getEnv("SQLITE_PATH", "kubepilot.db"),
 		CacheDriver:    cacheDriver,
@@ -112,10 +133,11 @@ func Load() *Config {
 		SSHSudo:           getBoolEnv("SSH_SUDO", false),
 		MCPAllowWrites: getBoolEnv("MCP_ALLOW_WRITES", false),
 		AdminEmail:     getEnv("ADMIN_EMAIL", ""),
-		AdminPassword:  getEnv("ADMIN_PASSWORD", ""),
+		AdminPassword:  adminPassword,
 		AdminName:      getEnv("ADMIN_NAME", "Administrator"),
 		InCluster:      getBoolEnv("IN_CLUSTER", false),
 		ClusterName:    getEnv("CLUSTER_NAME", "local"),
+		DemoMode:       demo,
 	}
 }
 

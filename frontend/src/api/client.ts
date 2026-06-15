@@ -3,6 +3,7 @@ import type {
   Cluster,
   Namespace,
   Node,
+  NodeMetric,
   Workload,
   HelmRelease,
   UpdateFinding,
@@ -116,6 +117,13 @@ export async function getNodes(filter?: NodeFilter): Promise<PaginatedResponse<N
 export async function getNode(id: string): Promise<Node> {
   const { data } = await api.get<Node>(`/nodes/${id}`)
   return data
+}
+
+export async function getNodeMetrics(id: string, since?: string): Promise<NodeMetric[]> {
+  const { data } = await api.get<PaginatedResponse<NodeMetric>>(`/nodes/${id}/metrics`, {
+    params: since ? { since } : undefined,
+  })
+  return data.data
 }
 
 // Workloads

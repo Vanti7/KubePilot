@@ -76,7 +76,10 @@ func runServer() {
 	bus := handlers.NewEventBus()
 	defer bus.Stop()
 
-	colMgr := collector.NewCollectorManager(s, logger)
+	colMgr := collector.NewCollectorManager(s, logger, collector.MetricsConfig{
+		Enabled:   cfg.NodeMetricsEnabled,
+		Retention: time.Duration(cfg.NodeMetricsRetentionHours) * time.Hour,
+	})
 
 	if cfg.LogLevel != "debug" {
 		gin.SetMode(gin.ReleaseMode)
@@ -94,36 +97,44 @@ func runServer() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go colMgr.RunCron(ctx)
+	// In demo mode the dataset is seeded and static: skip the live collectors,
+	// registry/helm watchers and scoring engine so they don't overwrite or purge it.
+	var imgWatcher *watcher.ImageWatcher
+	var helmWatcher *watcher.HelmWatcher
+	if cfg.DemoMode {
+		logger.Info("demo mode: live collectors, watchers and scoring are disabled")
+	} else {
+		go colMgr.RunCron(ctx)
 
-	imgWatcher := watcher.NewImageWatcher(s, logger)
-	workerInterval := time.Duration(cfg.WorkerInterval) * time.Second
-	go imgWatcher.Run(ctx, workerInterval)
+		imgWatcher = watcher.NewImageWatcher(s, logger)
+		workerInterval := time.Duration(cfg.WorkerInterval) * time.Second
+		go imgWatcher.Run(ctx, workerInterval)
 
-	helmWatcher := watcher.NewHelmWatcher(s, logger)
-	go helmWatcher.Run(ctx, workerInterval)
+		helmWatcher = watcher.NewHelmWatcher(s, logger)
+		go helmWatcher.Run(ctx, workerInterval)
 
-	scoreEngine := scoring.NewScoringEngine(s, logger)
-	go func() {
-		// Initial scoring pass after a brief delay to allow collectors to populate data.
-		time.Sleep(30 * time.Second)
-		if err := scoreEngine.ScoreAll(ctx); err != nil {
-			logger.Error("initial score all", zap.Error(err))
-		}
-
-		ticker := time.NewTicker(workerInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if err := scoreEngine.ScoreAll(ctx); err != nil {
-					logger.Error("score all", zap.Error(err))
-				}
-			case <-ctx.Done():
-				return
+		scoreEngine := scoring.NewScoringEngine(s, logger)
+		go func() {
+			// Initial scoring pass after a brief delay to allow collectors to populate data.
+			time.Sleep(30 * time.Second)
+			if err := scoreEngine.ScoreAll(ctx); err != nil {
+				logger.Error("initial score all", zap.Error(err))
 			}
-		}
-	}()
+
+			ticker := time.NewTicker(workerInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if err := scoreEngine.ScoreAll(ctx); err != nil {
+						logger.Error("score all", zap.Error(err))
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
 
 	go func() {
 		logger.Info("HTTP server listening", zap.String("addr", srv.Addr))
@@ -140,8 +151,12 @@ func runServer() {
 
 	cancel()
 	colMgr.Stop()
-	imgWatcher.Stop()
-	helmWatcher.Stop()
+	if imgWatcher != nil {
+		imgWatcher.Stop()
+	}
+	if helmWatcher != nil {
+		helmWatcher.Stop()
+	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()

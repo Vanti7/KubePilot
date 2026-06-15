@@ -111,6 +111,7 @@ func NewRouter(
 	{
 		nodes.GET("", nodeH.ListNodes)
 		nodes.GET("/:id", nodeH.GetNode)
+		nodes.GET("/:id/metrics", nodeH.GetNodeMetrics)
 	}
 
 	// Namespaces.

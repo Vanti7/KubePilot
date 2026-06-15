@@ -29,6 +29,13 @@ func Run(ctx context.Context, db *gorm.DB, cfg *config.Config, logger *zap.Logge
 	if err := ensureAdminUser(ctx, db, cfg, logger); err != nil {
 		return fmt.Errorf("ensure admin user: %w", err)
 	}
+	if cfg.DemoMode {
+		// Demo mode seeds a synthetic dataset and skips real cluster registration.
+		if err := ensureDemoData(ctx, db, logger); err != nil {
+			return fmt.Errorf("seed demo data: %w", err)
+		}
+		return nil
+	}
 	switch {
 	case cfg.InCluster:
 		if err := ensureLocalCluster(ctx, db, cfg, logger); err != nil {

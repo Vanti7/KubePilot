@@ -21,6 +21,15 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Added
+- **Métriques système des nœuds (agentless)** : collecte CPU / mémoire / disque / réseau de chaque nœud via le Summary API du kubelet (`/api/v1/nodes/<name>/proxy/stats/summary`, proxifié par l'API server — fonctionne aussi à travers le tunnel SSH). Stockées en time-series dans la nouvelle table `node_metrics`, échantillonnées à chaque passe de collecte
+- Endpoint `GET /api/v1/nodes/:id/metrics?since=<RFC3339|durée>` — historique d'usage d'un nœud (défaut : dernière heure)
+- Champ `metrics` (dernier échantillon : `cpu_usage_percent`, `memory_usage_percent`, `fs_used_percent`, débits réseau, `pods_running`) ajouté à `GET /api/v1/nodes`
+- Variables d'env `NODE_METRICS_ENABLED` (défaut `true`) et `NODE_METRICS_RETENTION_HOURS` (défaut `168` = 7 j, purge automatique des échantillons)
+- UI page Nodes : jauges CPU / mémoire / disque par nœud (rafraîchies toutes les 30 s) + sparklines d'historique (6 h) dans le détail du nœud
+- **Vue globale des ressources système sur le dashboard** (à la Proxmox/vCenter) : jauges radiales CPU / mémoire / disque agrégées à l'échelle du parc (capacité vs usage live), compteurs nœuds prêts et pods en cours, et répartition par cluster. Agrégation exposée dans `GET /api/v1/overview` (champs `system_resources` et `resources_per_cluster`)
+- **Mode démo** (`DEMO_MODE=true`) : seed d'un jeu de données synthétique multi-cluster (3 clusters, 11 nœuds avec métriques time-series sur 6 h, namespaces, findings + risk scores) et désactivation des collectors/watchers/scoring pour ne pas l'écraser. Login démo `admin@kubepilot.local` / `demo` (mot de passe par défaut en mode démo). Cible du proxy Vite surchargeable via `VITE_PROXY_TARGET`
+
 ### Changed
 - **Bruit de logs du watcher d'images** : les erreurs attendues/environnementales (TLS self-signed `x509`, `401`/`403` d'auth registry, hôte injoignable, références orphelines `record not found`) sont désormais loggées en `debug` au lieu de `warn` — elles inondaient les logs à chaque cycle. Les erreurs réellement inattendues restent en `warn`
 

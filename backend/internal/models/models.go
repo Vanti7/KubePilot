@@ -186,6 +186,30 @@ type Node struct {
 	UpdatedAt      time.Time      `                                                      json:"updated_at"`
 }
 
+// NodeMetric is a point-in-time sample of a node's resource usage, collected from
+// the kubelet Summary API. It is an append-only time-series — never upserted.
+type NodeMetric struct {
+	ID                    uuid.UUID `gorm:"type:uuid;primaryKey"                                   json:"id"`
+	ClusterID             uuid.UUID `gorm:"type:uuid;not null;index"                              json:"cluster_id"`
+	NodeID                uuid.UUID `gorm:"type:uuid;not null;index:idx_node_metric_node_ts,priority:1" json:"node_id"`
+	NodeName              string    `gorm:"not null"                                              json:"node_name"`
+	Timestamp             time.Time `gorm:"not null;index:idx_node_metric_node_ts,priority:2"     json:"timestamp"`
+	CPUUsageNanoCores     int64     `                                                            json:"cpu_usage_nano_cores"`
+	CPUUsagePercent       float64   `                                                            json:"cpu_usage_percent"`
+	MemoryWorkingSetBytes int64     `                                                            json:"memory_working_set_bytes"`
+	MemoryUsageBytes      int64     `                                                            json:"memory_usage_bytes"`
+	MemoryUsagePercent    float64   `                                                            json:"memory_usage_percent"`
+	FSUsedBytes           int64     `                                                            json:"fs_used_bytes"`
+	FSCapacityBytes       int64     `                                                            json:"fs_capacity_bytes"`
+	FSUsedPercent         float64   `                                                            json:"fs_used_percent"`
+	NetworkRxBytes        int64     `                                                            json:"network_rx_bytes"`
+	NetworkTxBytes        int64     `                                                            json:"network_tx_bytes"`
+	NetworkRxRate         float64   `                                                            json:"network_rx_rate"`
+	NetworkTxRate         float64   `                                                            json:"network_tx_rate"`
+	PodsRunning           int       `                                                            json:"pods_running"`
+	CreatedAt             time.Time `                                                            json:"created_at"`
+}
+
 // Workload represents a Kubernetes workload (Deployment, DaemonSet, StatefulSet).
 type Workload struct {
 	ID              uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
@@ -454,6 +478,7 @@ func AllModels() []interface{} {
 		&Cluster{},
 		&Namespace{},
 		&Node{},
+		&NodeMetric{},
 		&Workload{},
 		&WorkloadSource{},
 		&ContainerImage{},

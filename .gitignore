@@ -1,13 +1,14 @@
 # Go
 backend/vendor/
+backend/bin/
 backend/*.exe
 backend/*.test
 backend/coverage.out
 
 # Local-mode SQLite database (LOCAL_MODE / sqlite storage driver)
-kubepilot.db
-kubepilot.db-wal
-kubepilot.db-shm
+*.db
+*.db-wal
+*.db-shm
 
 # Node
 frontend/node_modules/

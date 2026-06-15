@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"go.uber.org/zap"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
@@ -35,11 +37,23 @@ type KubernetesCollector struct {
 	stopCh    chan struct{}
 	wg        sync.WaitGroup
 	sshTunnel *sshTunnel // non-nil only for ssh connection mode; closed on Stop
+
+	metrics   MetricsConfig
+	prevNetMu sync.Mutex
+	prevNet   map[string]netSample // node name -> last network counters, for rate calc
+}
+
+// netSample holds the cumulative network counters from a node's previous metric
+// sample, used to derive an instantaneous throughput rate.
+type netSample struct {
+	rxBytes int64
+	txBytes int64
+	ts      time.Time
 }
 
 // NewKubernetesCollector builds a KubernetesCollector for the given cluster model.
 // It resolves the kubeconfig from the KubeconfigRef field or falls back to in-cluster config.
-func NewKubernetesCollector(cluster *models.Cluster, s *store.Store, logger *zap.Logger) (*KubernetesCollector, error) {
+func NewKubernetesCollector(cluster *models.Cluster, s *store.Store, logger *zap.Logger, metrics MetricsConfig) (*KubernetesCollector, error) {
 	var restConfig *rest.Config
 	var err error
 	var tunnel *sshTunnel
@@ -108,6 +122,8 @@ func NewKubernetesCollector(cluster *models.Cluster, s *store.Store, logger *zap
 		logger:    logger.With(zap.String("cluster_id", cluster.ID.String()), zap.String("cluster_name", cluster.Name)),
 		stopCh:    make(chan struct{}),
 		sshTunnel: tunnel,
+		metrics:   metrics,
+		prevNet:   make(map[string]netSample),
 	}, nil
 }
 
@@ -167,6 +183,7 @@ func (kc *KubernetesCollector) collectAll(ctx context.Context) {
 
 	kc.collectNamespaces(ctx)
 	kc.collectNodes(ctx)
+	kc.collectNodeMetrics(ctx)
 	kc.collectWorkloads(ctx)
 	kc.collectHelmReleases(ctx)
 	kc.collectSecrets(ctx)
@@ -177,6 +194,11 @@ func (kc *KubernetesCollector) collectAll(ctx context.Context) {
 	_ = kc.store.DeleteHelmReleasesNotSeenSince(ctx, kc.clusterID, staleThreshold)
 	_ = kc.store.DeleteNodesNotSeenSince(ctx, kc.clusterID, staleThreshold)
 	_ = kc.store.DeleteSecretsNotSeenSince(ctx, kc.clusterID, staleThreshold)
+
+	// Purge node-metric samples beyond the retention window.
+	if kc.metrics.Enabled && kc.metrics.Retention > 0 {
+		_ = kc.store.DeleteNodeMetricsBefore(ctx, time.Now().Add(-kc.metrics.Retention))
+	}
 
 	_ = kc.store.UpdateClusterStatus(ctx, kc.clusterID, models.ClusterStatusHealthy, time.Now())
 
@@ -274,6 +296,144 @@ func (kc *KubernetesCollector) collectNodes(ctx context.Context) {
 			kc.logger.Error("upsert node", zap.String("name", n.Name), zap.Error(err))
 		}
 	}
+}
+
+// kubeletSummary is the subset of the kubelet /stats/summary response we consume.
+type kubeletSummary struct {
+	Node struct {
+		NodeName string `json:"nodeName"`
+		CPU      struct {
+			UsageNanoCores int64 `json:"usageNanoCores"`
+		} `json:"cpu"`
+		Memory struct {
+			WorkingSetBytes int64 `json:"workingSetBytes"`
+			UsageBytes      int64 `json:"usageBytes"`
+		} `json:"memory"`
+		Fs struct {
+			UsedBytes     int64 `json:"usedBytes"`
+			CapacityBytes int64 `json:"capacityBytes"`
+		} `json:"fs"`
+		Network struct {
+			RxBytes int64 `json:"rxBytes"`
+			TxBytes int64 `json:"txBytes"`
+		} `json:"network"`
+	} `json:"node"`
+	Pods []json.RawMessage `json:"pods"`
+}
+
+// collectNodeMetrics samples each node's resource usage from the kubelet Summary
+// API (proxied through the API server, so it also flows over the SSH tunnel) and
+// appends a time-series row. Per-node failures are logged at debug level and do
+// not abort the pass — some kubelets restrict the summary endpoint.
+func (kc *KubernetesCollector) collectNodeMetrics(ctx context.Context) {
+	if !kc.metrics.Enabled {
+		return
+	}
+
+	nodes, err := kc.store.ListNodes(ctx, kc.clusterID)
+	if err != nil {
+		kc.logger.Error("list nodes for metrics", zap.Error(err))
+		return
+	}
+
+	for _, node := range nodes {
+		raw, err := kc.clientset.CoreV1().RESTClient().Get().
+			AbsPath("/api/v1/nodes/" + node.Name + "/proxy/stats/summary").
+			DoRaw(ctx)
+		if err != nil {
+			kc.logger.Debug("fetch node summary", zap.String("node", node.Name), zap.Error(err))
+			continue
+		}
+
+		var summary kubeletSummary
+		if err := json.Unmarshal(raw, &summary); err != nil {
+			kc.logger.Debug("decode node summary", zap.String("node", node.Name), zap.Error(err))
+			continue
+		}
+
+		m := kc.buildNodeMetric(&node, &summary)
+		if err := kc.store.InsertNodeMetric(ctx, m); err != nil {
+			kc.logger.Error("insert node metric", zap.String("node", node.Name), zap.Error(err))
+		}
+	}
+}
+
+// buildNodeMetric converts a kubelet summary into a NodeMetric, computing usage
+// percentages against the node's capacity and network rates against the previous
+// sample.
+func (kc *KubernetesCollector) buildNodeMetric(node *models.Node, s *kubeletSummary) *models.NodeMetric {
+	now := time.Now()
+
+	m := &models.NodeMetric{
+		ClusterID:             node.ClusterID,
+		NodeID:                node.ID,
+		NodeName:              node.Name,
+		Timestamp:             now,
+		CPUUsageNanoCores:     s.Node.CPU.UsageNanoCores,
+		MemoryWorkingSetBytes: s.Node.Memory.WorkingSetBytes,
+		MemoryUsageBytes:      s.Node.Memory.UsageBytes,
+		FSUsedBytes:           s.Node.Fs.UsedBytes,
+		FSCapacityBytes:       s.Node.Fs.CapacityBytes,
+		NetworkRxBytes:        s.Node.Network.RxBytes,
+		NetworkTxBytes:        s.Node.Network.TxBytes,
+		PodsRunning:           len(s.Pods),
+	}
+
+	if capNano := parseCPUNanoCores(node.CapacityCPU); capNano > 0 {
+		m.CPUUsagePercent = round2(float64(s.Node.CPU.UsageNanoCores) / float64(capNano) * 100)
+	}
+	if capBytes := parseMemoryBytes(node.CapacityMemory); capBytes > 0 {
+		m.MemoryUsagePercent = round2(float64(s.Node.Memory.WorkingSetBytes) / float64(capBytes) * 100)
+	}
+	if s.Node.Fs.CapacityBytes > 0 {
+		m.FSUsedPercent = round2(float64(s.Node.Fs.UsedBytes) / float64(s.Node.Fs.CapacityBytes) * 100)
+	}
+
+	kc.prevNetMu.Lock()
+	if prev, ok := kc.prevNet[node.Name]; ok {
+		if dt := now.Sub(prev.ts).Seconds(); dt > 0 {
+			// Guard against counter resets (node/kubelet restart) producing negatives.
+			if d := s.Node.Network.RxBytes - prev.rxBytes; d >= 0 {
+				m.NetworkRxRate = round2(float64(d) / dt)
+			}
+			if d := s.Node.Network.TxBytes - prev.txBytes; d >= 0 {
+				m.NetworkTxRate = round2(float64(d) / dt)
+			}
+		}
+	}
+	kc.prevNet[node.Name] = netSample{rxBytes: s.Node.Network.RxBytes, txBytes: s.Node.Network.TxBytes, ts: now}
+	kc.prevNetMu.Unlock()
+
+	return m
+}
+
+// parseCPUNanoCores converts a Kubernetes CPU quantity (e.g. "4", "500m") to nanocores.
+func parseCPUNanoCores(q string) int64 {
+	if q == "" {
+		return 0
+	}
+	qty, err := resource.ParseQuantity(q)
+	if err != nil {
+		return 0
+	}
+	// MilliValue is millicores; 1 millicore = 1e6 nanocores.
+	return qty.MilliValue() * 1e6
+}
+
+// parseMemoryBytes converts a Kubernetes memory quantity (e.g. "16331252Ki") to bytes.
+func parseMemoryBytes(q string) int64 {
+	if q == "" {
+		return 0
+	}
+	qty, err := resource.ParseQuantity(q)
+	if err != nil {
+		return 0
+	}
+	return qty.Value()
+}
+
+func round2(f float64) float64 {
+	return math.Round(f*100) / 100
 }
 
 // watchNodes watches node changes, reconnecting on channel close until stopped.
