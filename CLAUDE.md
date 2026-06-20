@@ -3,6 +3,8 @@
 This file is the persistent memory for Claude Code working on this repository.
 Read it at the start of every session. Update it whenever something notable changes.
 
+> 📋 **Suivi des tâches & séquencement** : voir [`docs/workflow.md`](docs/workflow.md) — tableau de bord vivant (à mettre à jour à chaque session), maintenu en complément de ce fichier et du `CHANGELOG.md`.
+
 ---
 
 ## Règle obligatoire — Changelog
