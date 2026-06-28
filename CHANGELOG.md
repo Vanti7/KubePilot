@@ -44,6 +44,7 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 - **Mode démo** (`DEMO_MODE=true`) : seed d'un jeu de données synthétique multi-cluster (3 clusters, 11 nœuds avec métriques time-series sur 6 h, namespaces, findings + risk scores) et désactivation des collectors/watchers/scoring pour ne pas l'écraser. Login démo `admin@kubepilot.local` / `demo` (mot de passe par défaut en mode démo). Cible du proxy Vite surchargeable via `VITE_PROXY_TARGET`
 
 ### Changed
+- **Panneau System Resources du dashboard** : affiché en permanence avec un état vide explicite (« No node metrics collected yet ») au lieu d'être masqué quand aucune métrique n'est encore collectée
 - **Bruit de logs du watcher d'images** : les erreurs attendues/environnementales (TLS self-signed `x509`, `401`/`403` d'auth registry, hôte injoignable, références orphelines `record not found`) sont désormais loggées en `debug` au lieu de `warn` — elles inondaient les logs à chaque cycle. Les erreurs réellement inattendues restent en `warn`
 
 ### Fixed

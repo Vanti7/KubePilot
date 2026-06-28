@@ -261,40 +261,53 @@ export function Overview() {
       </div>
 
       {/* System resources (cluster-wide capacity vs live usage) */}
-      {sys && sys.nodes > 0 && (
+      {!isLoading && (
         <div className="panel">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-surface-border">
             <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
               System Resources
             </h2>
-            <span className="text-xs text-slate-500 font-mono">
-              {sys.nodes_ready}/{sys.nodes} nodes ready · {sys.pods_running} pods
-            </span>
+            {sys && sys.nodes > 0 && (
+              <span className="text-xs text-slate-500 font-mono">
+                {sys.nodes_ready}/{sys.nodes} nodes ready · {sys.pods_running} pods
+              </span>
+            )}
           </div>
-          <div className="grid grid-cols-3 gap-3 p-4">
-            <ResourceGauge
-              label="CPU"
-              percent={sys.cpu_usage_percent}
-              detail={`${sys.cpu_used_cores.toFixed(1)} / ${sys.cpu_capacity_cores.toFixed(0)} cores`}
-            />
-            <ResourceGauge
-              label="Memory"
-              percent={sys.memory_usage_percent}
-              detail={`${bytesToHuman(sys.memory_used_bytes)} / ${bytesToHuman(sys.memory_capacity_bytes)}`}
-            />
-            <ResourceGauge
-              label="Disk"
-              percent={sys.disk_usage_percent}
-              detail={`${bytesToHuman(sys.disk_used_bytes)} / ${bytesToHuman(sys.disk_capacity_bytes)}`}
-            />
-          </div>
-          {perCluster.length > 1 && (
-            <DataTable
-              columns={resourceColumns}
-              data={perCluster}
-              rowKey={(r) => r.cluster_id}
-              onRowClick={(r) => navigate(`/clusters/${r.cluster_id}`)}
-            />
+          {sys && sys.nodes > 0 ? (
+            <>
+              <div className="grid grid-cols-3 gap-3 p-4">
+                <ResourceGauge
+                  label="CPU"
+                  percent={sys.cpu_usage_percent}
+                  detail={`${sys.cpu_used_cores.toFixed(1)} / ${sys.cpu_capacity_cores.toFixed(0)} cores`}
+                />
+                <ResourceGauge
+                  label="Memory"
+                  percent={sys.memory_usage_percent}
+                  detail={`${bytesToHuman(sys.memory_used_bytes)} / ${bytesToHuman(sys.memory_capacity_bytes)}`}
+                />
+                <ResourceGauge
+                  label="Disk"
+                  percent={sys.disk_usage_percent}
+                  detail={`${bytesToHuman(sys.disk_used_bytes)} / ${bytesToHuman(sys.disk_capacity_bytes)}`}
+                />
+              </div>
+              {perCluster.length > 1 && (
+                <DataTable
+                  columns={resourceColumns}
+                  data={perCluster}
+                  rowKey={(r) => r.cluster_id}
+                  onRowClick={(r) => navigate(`/clusters/${r.cluster_id}`)}
+                />
+              )}
+            </>
+          ) : (
+            <div className="px-4 py-8 text-center">
+              <p className="text-xs text-slate-500">No node metrics collected yet.</p>
+              <p className="text-xs text-slate-600 mt-1">
+                Metrics appear once a collector runs with <span className="font-mono">NODE_METRICS_ENABLED</span>.
+              </p>
+            </div>
           )}
         </div>
       )}
