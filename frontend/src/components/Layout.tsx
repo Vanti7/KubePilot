@@ -1,12 +1,14 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, useNavigate } from 'react-router-dom'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { User, LogOut, Settings } from 'lucide-react'
+import { User, LogOut, Settings, Command } from 'lucide-react'
 import { Sidebar } from './Sidebar'
 import { ClusterSelector } from './ClusterSelector'
+import { CommandPalette } from './CommandPalette'
 import { useAuth } from '../contexts/AuthContext'
 
 export function Layout() {
   const { user, logout } = useAuth()
+  const navigate = useNavigate()
 
   return (
     <div className="flex h-screen bg-surface-base overflow-hidden">
@@ -25,6 +27,16 @@ export function Layout() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Command palette trigger (also Cmd/Ctrl+K) */}
+            <button
+              className="hidden sm:flex items-center gap-1.5 px-2 py-1.5 rounded border border-surface-border text-slate-500 hover:text-slate-300 hover:border-slate-600 transition-colors"
+              onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))}
+              title="Search (Ctrl+K)"
+            >
+              <Command size={13} />
+              <kbd className="text-xs">K</kbd>
+            </button>
+
             <ClusterSelector />
 
             {/* User menu */}
@@ -47,7 +59,7 @@ export function Layout() {
                   </div>
                   <DropdownMenu.Item
                     className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-surface-panel outline-none text-slate-400 hover:text-slate-200"
-                    onSelect={() => {}}
+                    onSelect={() => navigate('/settings')}
                   >
                     <Settings size={14} />
                     Settings
@@ -71,6 +83,8 @@ export function Layout() {
           <Outlet />
         </main>
       </div>
+
+      <CommandPalette />
     </div>
   )
 }

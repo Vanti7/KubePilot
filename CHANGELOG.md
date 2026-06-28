@@ -22,6 +22,7 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 ### Added
+- **Command palette** (`Ctrl/Cmd+K`, ou bouton dans la barre du haut) : navigation rapide vers les pages et les clusters, au clavier (flèches + Entrée). L'item « Settings » du menu utilisateur, jusqu'ici inopérant, ouvre désormais la page Settings
 - **Export CSV des findings** : bouton « Export » sur la page Updates et endpoint `GET /api/v1/findings/export` (mêmes filtres que la liste, pagination interne plafonnée par `EXPORT_MAX_ROWS`, défaut `10000`). Colonnes : cluster, namespace, kind, resource, versions, type, sévérité, score, statut, date de détection, titre
 - **Détail cluster enrichi** : la page d'un cluster affiche désormais un panneau **System Resources** (jauges radiales CPU / mémoire / disque, nœuds prêts, pods) et la **liste de ses nœuds** (rôle, kubelet, statut Ready), en plus des findings. Nouvel endpoint `GET /api/v1/clusters/:id/resources`. Le composant `ResourceGauge` est désormais partagé entre le dashboard et le détail cluster
 - **Page Settings** (`/settings`, entrée sidebar réservée aux admins) — gestion des utilisateurs et infos système, accès restreint au rôle `admin`
