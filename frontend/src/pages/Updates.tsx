@@ -10,6 +10,7 @@ import {
   Check,
   X,
   Container,
+  Download,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { DataTable, Column } from '../components/DataTable'
@@ -19,7 +20,7 @@ import { SlideOver } from '../components/SlideOver'
 import { FindingDetail } from '../components/FindingDetail'
 import { useFindingsFilter, useFindings, type FindingsFilterState } from '../hooks/useFindings'
 import { useClusters } from '../hooks/useClusters'
-import { updateFindingStatus, getRegistries } from '../api/client'
+import { updateFindingStatus, getRegistries, exportFindingsCsv } from '../api/client'
 import type { UpdateFinding, Severity, FindingStatus, UpdateType } from '../types'
 import { formatAge, scoreToColor, scoreToBg, updateTypeLabel } from '../utils/formatting'
 
@@ -355,8 +356,19 @@ export function Updates({ initialFilter }: { initialFilter?: Partial<FindingsFil
           onChange={(e) => setFilter({ ...filter, namespace: e.target.value })}
         />
 
-        <div className="ml-auto text-xs text-slate-500">
-          {total} finding{total !== 1 ? 's' : ''}
+        <div className="ml-auto flex items-center gap-3">
+          <span className="text-xs text-slate-500">
+            {total} finding{total !== 1 ? 's' : ''}
+          </span>
+          <button
+            className="btn btn-secondary py-1 px-2 text-xs disabled:opacity-50"
+            onClick={() => exportFindingsCsv(apiFilter)}
+            disabled={total === 0}
+            title="Export filtered findings to CSV"
+          >
+            <Download size={12} />
+            Export
+          </button>
         </div>
       </div>
 

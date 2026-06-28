@@ -90,6 +90,7 @@ func NewRouter(
 	{
 		findings.GET("", findingH.ListFindings)
 		findings.GET("/summary", findingH.GetFindingSummary)
+		findings.GET("/export", findingH.ExportFindings)
 		findings.GET("/:id", findingH.GetFinding)
 		findings.PATCH("/:id/status", middleware.RequireRole("operator"), findingH.UpdateFindingStatus)
 	}

@@ -216,6 +216,25 @@ export async function getFindingSummary(): Promise<FindingSummary> {
   return data
 }
 
+// Downloads the current findings selection as a CSV file. Mirrors the server-
+// side filters that ListFindings understands (cluster_id, single severity/status).
+export async function exportFindingsCsv(filter?: FindingFilter): Promise<void> {
+  const params: Record<string, string> = {}
+  if (filter?.cluster_id) params.cluster_id = filter.cluster_id
+  if (Array.isArray(filter?.severity) && filter!.severity!.length === 1) params.severity = filter!.severity![0]
+  if (Array.isArray(filter?.status) && filter!.status!.length === 1) params.status = filter!.status![0]
+
+  const res = await api.get('/findings/export', { params, responseType: 'blob' })
+  const url = window.URL.createObjectURL(res.data as Blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `kubepilot-findings-${new Date().toISOString().slice(0, 10)}.csv`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.URL.revokeObjectURL(url)
+}
+
 // Secrets
 export async function getSecrets(filter?: SecretFilter): Promise<PaginatedResponse<Secret>> {
   const { data } = await api.get<PaginatedResponse<Secret>>('/secrets', { params: filter })

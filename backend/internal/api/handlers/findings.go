@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"encoding/csv"
 	"net/http"
+	"os"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kubepilot/backend/internal/api/middleware"
@@ -58,6 +61,77 @@ func (h *FindingHandler) ListFindings(c *gin.Context) {
 		"limit":  filter.Limit,
 		"offset": filter.Offset,
 	})
+}
+
+// ExportFindings streams matching findings as a CSV download. It honors the
+// same filters as ListFindings and pages internally up to EXPORT_MAX_ROWS
+// (default 10000).
+// GET /api/v1/findings/export
+func (h *FindingHandler) ExportFindings(c *gin.Context) {
+	filter := store.FindingFilter{
+		ClusterID:   c.Query("cluster_id"),
+		NamespaceID: c.Query("namespace_id"),
+		Severity:    c.Query("severity"),
+		Status:      c.Query("status"),
+		Kind:        c.Query("kind"),
+	}
+
+	maxRows := 10000
+	if v := os.Getenv("EXPORT_MAX_ROWS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxRows = n
+		}
+	}
+
+	const page = 500
+	var all []store.FindingWithScore
+	for offset := 0; offset < maxRows; offset += page {
+		filter.Limit = page
+		filter.Offset = offset
+		rows, total, err := h.store.ListFindings(c.Request.Context(), filter)
+		if err != nil {
+			h.logger.Error("export findings", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to export findings"})
+			return
+		}
+		all = append(all, rows...)
+		if len(rows) < page || int64(len(all)) >= total {
+			break
+		}
+	}
+	if len(all) > maxRows {
+		all = all[:maxRows]
+	}
+
+	c.Header("Content-Type", "text/csv")
+	c.Header("Content-Disposition", `attachment; filename="kubepilot-findings.csv"`)
+
+	w := csv.NewWriter(c.Writer)
+	defer w.Flush()
+	_ = w.Write([]string{
+		"cluster", "namespace", "kind", "resource", "current_version", "latest_version",
+		"update_type", "severity", "score", "status", "first_detected_at", "title",
+	})
+	for _, f := range all {
+		score := ""
+		if f.Score != nil {
+			score = strconv.FormatFloat(*f.Score, 'f', 0, 64)
+		}
+		_ = w.Write([]string{
+			f.ClusterName,
+			f.NamespaceName,
+			f.Kind,
+			f.WorkloadName,
+			f.CurrentVersion,
+			f.LatestVersion,
+			f.UpdateType,
+			f.Severity,
+			score,
+			f.Status,
+			f.FirstDetectedAt.Format(time.RFC3339),
+			f.Title,
+		})
+	}
 }
 
 // GetFinding returns a single finding by ID.
