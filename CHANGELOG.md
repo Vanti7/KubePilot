@@ -22,6 +22,11 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 ### Added
+- **Gestion des registries privés** : nouvelle page **Registries** (`/registries`, entrée sidebar) pour configurer identifiants et TLS des registres privés/self-signed (Harbor, GHCR, Quay, ECR, GCR, ACR, OCI générique) — sans quoi le watcher d'images ne pouvait scanner que les registres publics et ne produisait aucun finding pour ces images
+  - **API** : `GET/POST/PUT/DELETE /api/v1/registries` + `POST /api/v1/registries/:id/test` (sonde `GET /v2/` avec auth → joignabilité). Écriture réservée `operator`/`admin`. Les identifiants ne sont **jamais** renvoyés par l'API (seulement `username` + `has_credentials`)
+  - **Rattachement automatique** : les `container_images` sont liées à un registre configuré par host (à la collecte et lors de la création/màj d'un registre) ; le watcher utilise alors ses identifiants (basic auth) et son réglage TLS
+  - **TLS par registre** : champ `tls_insecure` (modèle `ImageRegistry`, migration `008_registry_tls.sql`) — le watcher utilise un client HTTP dédié `InsecureSkipVerify` uniquement pour les registres ainsi marqués (Harbor self-signed)
+  - **UI** : bandeau d'incitation sur la page Updates quand aucun finding et aucun registre configuré, pointant vers `/registries`
 - **Métriques système des nœuds (agentless)** : collecte CPU / mémoire / disque / réseau de chaque nœud via le Summary API du kubelet (`/api/v1/nodes/<name>/proxy/stats/summary`, proxifié par l'API server — fonctionne aussi à travers le tunnel SSH). Stockées en time-series dans la nouvelle table `node_metrics`, échantillonnées à chaque passe de collecte
 - Endpoint `GET /api/v1/nodes/:id/metrics?since=<RFC3339|durée>` — historique d'usage d'un nœud (défaut : dernière heure)
 - Champ `metrics` (dernier échantillon : `cpu_usage_percent`, `memory_usage_percent`, `fs_used_percent`, débits réseau, `pods_running`) ajouté à `GET /api/v1/nodes`

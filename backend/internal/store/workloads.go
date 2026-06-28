@@ -133,6 +133,14 @@ func (s *Store) UpsertContainerImage(ctx context.Context, image *models.Containe
 		image.ID = uuid.New()
 	}
 
+	// Link the image to a configured registry by host, so the watcher can use
+	// its credentials/TLS settings. Best-effort: unconfigured hosts stay nil.
+	if image.RegistryID == nil && image.Registry != "" {
+		if reg, err := s.GetImageRegistry(ctx, image.Registry); err == nil && reg != nil {
+			image.RegistryID = &reg.ID
+		}
+	}
+
 	return s.DB.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{

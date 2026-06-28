@@ -132,6 +132,17 @@ func NewRouter(
 		integrations.DELETE("/:id", middleware.RequireRole("admin"), integrationH.DeleteIntegration)
 	}
 
+	// Image registries.
+	registryH := handlers.NewRegistryHandler(s, logger)
+	registries := v1.Group("/registries")
+	{
+		registries.GET("", registryH.ListRegistries)
+		registries.POST("", middleware.RequireRole("operator"), registryH.CreateRegistry)
+		registries.PUT("/:id", middleware.RequireRole("operator"), registryH.UpdateRegistry)
+		registries.DELETE("/:id", middleware.RequireRole("admin"), registryH.DeleteRegistry)
+		registries.POST("/:id/test", middleware.RequireRole("operator"), registryH.TestRegistry)
+	}
+
 	// Overview.
 	overviewH := handlers.NewOverviewHandler(s, logger)
 	v1.GET("/overview", overviewH.GetOverview)

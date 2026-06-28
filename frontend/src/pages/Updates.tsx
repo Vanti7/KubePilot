@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, Link } from 'react-router-dom'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Filter,
   ChevronDown,
@@ -9,6 +9,7 @@ import {
   MoreHorizontal,
   Check,
   X,
+  Container,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { DataTable, Column } from '../components/DataTable'
@@ -18,7 +19,7 @@ import { SlideOver } from '../components/SlideOver'
 import { FindingDetail } from '../components/FindingDetail'
 import { useFindingsFilter, useFindings, type FindingsFilterState } from '../hooks/useFindings'
 import { useClusters } from '../hooks/useClusters'
-import { updateFindingStatus } from '../api/client'
+import { updateFindingStatus, getRegistries } from '../api/client'
 import type { UpdateFinding, Severity, FindingStatus, UpdateType } from '../types'
 import { formatAge, scoreToColor, scoreToBg, updateTypeLabel } from '../utils/formatting'
 
@@ -108,6 +109,7 @@ export function Updates({ initialFilter }: { initialFilter?: Partial<FindingsFil
   const { filter, setFilter, apiFilter } = useFindingsFilter(initialFilter)
   const { data, isLoading } = useFindings(apiFilter)
   const { data: clusters = [] } = useClusters()
+  const { data: registries = [] } = useQuery({ queryKey: ['registries'], queryFn: getRegistries })
   const qc = useQueryClient()
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -380,6 +382,19 @@ export function Updates({ initialFilter }: { initialFilter?: Partial<FindingsFil
           >
             <X size={14} />
           </button>
+        </div>
+      )}
+
+      {/* No-registry hint: private images aren't scanned without credentials. */}
+      {!isLoading && total === 0 && registries.length === 0 && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-blue-950/30 border-b border-blue-900/40">
+          <Container size={16} className="text-blue-400 flex-shrink-0" />
+          <div className="text-xs text-slate-300">
+            No update findings yet. Private and self-signed registries aren't scanned until you add credentials.
+          </div>
+          <Link to="/registries" className="btn btn-secondary py-1 px-2 text-xs ml-auto whitespace-nowrap">
+            Configure registries
+          </Link>
         </div>
       )}
 

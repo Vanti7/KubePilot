@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,10 +21,11 @@ const imageTagCacheTTL = 30 * time.Minute
 
 // ImageWatcher polls container registries to detect new image tags.
 type ImageWatcher struct {
-	store      *store.Store
-	httpClient *http.Client
-	logger     *zap.Logger
-	stopCh     chan struct{}
+	store          *store.Store
+	httpClient     *http.Client
+	insecureClient *http.Client
+	logger         *zap.Logger
+	stopCh         chan struct{}
 }
 
 // NewImageWatcher creates a new ImageWatcher.
@@ -33,9 +35,26 @@ func NewImageWatcher(s *store.Store, logger *zap.Logger) *ImageWatcher {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		// Used only for registries explicitly marked tls_insecure (self-signed
+		// Harbor & co); never used for public registries.
+		insecureClient: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		},
 		logger: logger,
 		stopCh: make(chan struct{}),
 	}
+}
+
+// clientFor returns the HTTP client to use for an image, honoring the
+// per-registry TLS-insecure flag.
+func (iw *ImageWatcher) clientFor(image *models.ContainerImage) *http.Client {
+	if image.ImageRegistry != nil && image.ImageRegistry.TLSInsecure {
+		return iw.insecureClient
+	}
+	return iw.httpClient
 }
 
 // Run starts the image watcher loop.
@@ -206,6 +225,8 @@ func (iw *ImageWatcher) fetchTags(ctx context.Context, image *models.ContainerIm
 
 	url := fmt.Sprintf("https://%s/v2/%s/tags/list", registry, image.Repository)
 
+	client := iw.clientFor(image)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -223,7 +244,7 @@ func (iw *ImageWatcher) fetchTags(ctx context.Context, image *models.ContainerIm
 		}
 	}
 
-	resp, err := iw.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +260,7 @@ func (iw *ImageWatcher) fetchTags(ctx context.Context, image *models.ContainerIm
 
 		req2, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		req2.Header.Set("Authorization", "Bearer "+token)
-		resp, err = iw.httpClient.Do(req2)
+		resp, err = client.Do(req2)
 		if err != nil {
 			return nil, err
 		}

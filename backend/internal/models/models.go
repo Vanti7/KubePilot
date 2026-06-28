@@ -267,7 +267,8 @@ type ImageRegistry struct {
 	Host           string         `gorm:"uniqueIndex;not null"                           json:"host"`
 	Type           string         `gorm:"default:'generic'"                              json:"type"`
 	CredentialsRef string         `                                                      json:"credentials_ref,omitempty"`
-	AuthConfig     datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"auth_config,omitempty"`
+	AuthConfig     datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"-"`
+	TLSInsecure    bool           `gorm:"default:false"                                  json:"tls_insecure"`
 	RateLimitRPM   int            `gorm:"default:60"                                     json:"rate_limit_rpm"`
 	CreatedAt      time.Time      `                                                      json:"created_at"`
 	UpdatedAt      time.Time      `                                                      json:"updated_at"`

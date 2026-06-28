@@ -252,6 +252,27 @@ export interface IntegrationAccount {
   last_test_status: string
 }
 
+export type RegistryType = 'generic' | 'dockerhub' | 'harbor' | 'ecr' | 'gcr' | 'acr' | 'ghcr' | 'quay'
+
+export interface ImageRegistry {
+  id: string
+  name: string
+  host: string
+  type: RegistryType
+  username?: string
+  has_credentials: boolean
+  tls_insecure: boolean
+  rate_limit_rpm: number
+  created_at: string
+  updated_at: string
+}
+
+export interface RegistryTestResult {
+  ok: boolean
+  status_code: number
+  message: string
+}
+
 export interface FindingFilter {
   severity?: Severity[]
   status?: FindingStatus[]

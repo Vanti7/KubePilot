@@ -20,6 +20,8 @@ import type {
   FindingStatus,
   LoginResponse,
   User,
+  ImageRegistry,
+  RegistryTestResult,
 } from '../types'
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
@@ -208,6 +210,41 @@ export async function testIntegration(id: string): Promise<{ success: boolean; m
 
 export async function deleteIntegration(id: string): Promise<void> {
   await api.delete(`/integrations/${id}`)
+}
+
+// Image registries
+export interface RegistryPayload {
+  name: string
+  host: string
+  type?: string
+  username?: string
+  password?: string
+  tls_insecure?: boolean
+  rate_limit_rpm?: number
+}
+
+export async function getRegistries(): Promise<ImageRegistry[]> {
+  const { data } = await api.get<ImageRegistry[]>('/registries')
+  return data
+}
+
+export async function createRegistry(payload: RegistryPayload): Promise<ImageRegistry> {
+  const { data } = await api.post<ImageRegistry>('/registries', payload)
+  return data
+}
+
+export async function updateRegistry(id: string, payload: RegistryPayload): Promise<ImageRegistry> {
+  const { data } = await api.put<ImageRegistry>(`/registries/${id}`, payload)
+  return data
+}
+
+export async function testRegistry(id: string): Promise<RegistryTestResult> {
+  const { data } = await api.post<RegistryTestResult>(`/registries/${id}/test`)
+  return data
+}
+
+export async function deleteRegistry(id: string): Promise<void> {
+  await api.delete(`/registries/${id}`)
 }
 
 export default api

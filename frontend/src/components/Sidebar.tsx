@@ -12,6 +12,7 @@ import {
   Clock,
   Plug,
   Network,
+  Container,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useFindingSummary } from '../hooks/useFindings'
@@ -60,6 +61,7 @@ export function Sidebar() {
 
   const systemItems: NavItem[] = [
     { to: '/clusters', icon: <Network size={16} />, label: 'Clusters' },
+    { to: '/registries', icon: <Container size={16} />, label: 'Registries' },
     { to: '/risks', icon: <ShieldAlert size={16} />, label: 'Risks' },
     {
       to: '/maintenance',

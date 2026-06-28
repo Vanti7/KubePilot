@@ -13,6 +13,7 @@ import { Integrations } from './pages/Integrations'
 import { Secrets } from './pages/Secrets'
 import { Clusters } from './pages/Clusters'
 import { ClusterDetail } from './pages/ClusterDetail'
+import { Registries } from './pages/Registries'
 
 function ProtectedRoutes() {
   const { token, isLoading } = useAuth()
@@ -45,6 +46,7 @@ function ProtectedRoutes() {
           <Route path="/helm" element={<HelmPage />} />
           <Route path="/nodes" element={<Nodes />} />
           <Route path="/secrets" element={<Secrets />} />
+          <Route path="/registries" element={<Registries />} />
           <Route path="/integrations" element={<Integrations />} />
           <Route path="/clusters" element={<Clusters />} />
           <Route path="/clusters/:id" element={<ClusterDetail />} />
