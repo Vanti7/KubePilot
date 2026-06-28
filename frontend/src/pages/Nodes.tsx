@@ -21,6 +21,10 @@ function formatRate(bytesPerSec: number): string {
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
 }
 
+function pct(v: number): string {
+  return `${v.toFixed(0)}%`
+}
+
 // UsageBar renders a compact horizontal gauge for a percentage value, colored by
 // threshold. Renders a dash when the value is unavailable (no metrics yet).
 function UsageBar({ percent, label }: { percent?: number; label: string }) {
@@ -36,8 +40,10 @@ function UsageBar({ percent, label }: { percent?: number; label: string }) {
   )
 }
 
-// Sparkline draws a normalized polyline over the given series, no charting lib.
-function Sparkline({ values, color }: { values: number[]; color: string }) {
+// Sparkline draws a normalized polyline over the given series (no charting lib)
+// and reveals the value at the hovered position via a guide, dot and label.
+function Sparkline({ values, color, format }: { values: number[]; color: string; format?: (v: number) => string }) {
+  const [hover, setHover] = useState<number | null>(null)
   if (values.length < 2) return <div className="h-10 flex items-center text-xs text-slate-600">Not enough data</div>
   const w = 240
   const h = 40
@@ -45,6 +51,8 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
   const max = Math.max(...values)
   const min = Math.min(...values)
   const range = max - min || 1
+  const xPct = (i: number) => (i / (values.length - 1)) * 100
+  const yPct = (v: number) => ((h - pad - ((v - min) / range) * (h - 2 * pad)) / h) * 100
   const pts = values
     .map((v, i) => {
       const x = pad + (i / (values.length - 1)) * (w - 2 * pad)
@@ -52,21 +60,47 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
       return `${x.toFixed(1)},${y.toFixed(1)}`
     })
     .join(' ')
+
+  function onMove(e: React.MouseEvent<HTMLDivElement>) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const ratio = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1)
+    setHover(Math.round(ratio * (values.length - 1)))
+  }
+
+  const fmt = format ?? ((v: number) => v.toFixed(0))
+
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-10" preserveAspectRatio="none">
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-    </svg>
+    <div className="relative h-10" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-10 block" preserveAspectRatio="none">
+        <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+      </svg>
+      {hover != null && (
+        <>
+          <div className="absolute top-0 bottom-0 w-px bg-slate-600 pointer-events-none" style={{ left: `${xPct(hover)}%` }} />
+          <div
+            className="absolute w-1.5 h-1.5 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ left: `${xPct(hover)}%`, top: `${yPct(values[hover])}%`, backgroundColor: color }}
+          />
+          <div
+            className="absolute -top-4 px-1 py-0.5 rounded bg-surface-elevated border border-surface-border text-xs font-mono text-slate-200 pointer-events-none -translate-x-1/2 whitespace-nowrap"
+            style={{ left: `${Math.min(Math.max(xPct(hover), 8), 92)}%` }}
+          >
+            {fmt(values[hover])}
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
-function MetricRow({ label, value, values, color }: { label: string; value: string; values: number[]; color: string }) {
+function MetricRow({ label, value, values, color, format }: { label: string; value: string; values: number[]; color: string; format?: (v: number) => string }) {
   return (
     <div>
       <div className="flex justify-between text-xs mb-0.5">
         <span className="text-slate-500">{label}</span>
         <span className="font-mono text-slate-300">{value}</span>
       </div>
-      <Sparkline values={values} color={color} />
+      <Sparkline values={values} color={color} format={format} />
     </div>
   )
 }
@@ -94,11 +128,11 @@ function NodeMetricsPanel({ nodeId }: { nodeId: string }) {
   return (
     <div className="panel p-3 space-y-3">
       <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Metrics (6h)</div>
-      <MetricRow label="CPU" value={`${last.cpu_usage_percent.toFixed(0)}%`} values={series('cpu_usage_percent')} color="#34d399" />
-      <MetricRow label="Memory" value={`${last.memory_usage_percent.toFixed(0)}%`} values={series('memory_usage_percent')} color="#60a5fa" />
-      <MetricRow label="Disk" value={`${last.fs_used_percent.toFixed(0)}%`} values={series('fs_used_percent')} color="#fbbf24" />
-      <MetricRow label="Net In" value={formatRate(last.network_rx_rate)} values={series('network_rx_rate')} color="#a78bfa" />
-      <MetricRow label="Net Out" value={formatRate(last.network_tx_rate)} values={series('network_tx_rate')} color="#f472b6" />
+      <MetricRow label="CPU" value={`${last.cpu_usage_percent.toFixed(0)}%`} values={series('cpu_usage_percent')} color="#34d399" format={pct} />
+      <MetricRow label="Memory" value={`${last.memory_usage_percent.toFixed(0)}%`} values={series('memory_usage_percent')} color="#60a5fa" format={pct} />
+      <MetricRow label="Disk" value={`${last.fs_used_percent.toFixed(0)}%`} values={series('fs_used_percent')} color="#fbbf24" format={pct} />
+      <MetricRow label="Net In" value={formatRate(last.network_rx_rate)} values={series('network_rx_rate')} color="#a78bfa" format={formatRate} />
+      <MetricRow label="Net Out" value={formatRate(last.network_tx_rate)} values={series('network_tx_rate')} color="#f472b6" format={formatRate} />
       <div className="flex justify-between text-xs pt-1">
         <span className="text-slate-500">Pods running</span>
         <span className="font-mono text-slate-300">{last.pods_running}</span>
