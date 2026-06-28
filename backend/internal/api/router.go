@@ -78,6 +78,7 @@ func NewRouter(
 		clusters.GET("", clusterH.ListClusters)
 		clusters.POST("", middleware.RequireRole("operator"), clusterH.CreateCluster)
 		clusters.GET("/:id", clusterH.GetCluster)
+		clusters.GET("/:id/resources", clusterH.GetClusterResources)
 		clusters.PUT("/:id", middleware.RequireRole("operator"), clusterH.UpdateCluster)
 		clusters.DELETE("/:id", middleware.RequireRole("admin"), clusterH.DeleteCluster)
 		clusters.POST("/:id/sync", middleware.RequireRole("operator"), clusterH.SyncCluster)

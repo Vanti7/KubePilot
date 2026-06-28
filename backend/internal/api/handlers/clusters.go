@@ -278,6 +278,28 @@ func (h *ClusterHandler) SyncCluster(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"message": "sync triggered", "cluster_id": id, "collector_active": triggered})
 }
 
+// GetClusterResources returns the cluster-wide capacity vs live usage summary.
+// GET /api/v1/clusters/:id/resources
+func (h *ClusterHandler) GetClusterResources(c *gin.Context) {
+	id := c.Param("id")
+	if _, err := h.store.GetCluster(c.Request.Context(), id); err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get cluster"})
+		return
+	}
+
+	res, err := h.store.SystemResources(c.Request.Context(), id)
+	if err != nil {
+		h.logger.Error("cluster resources", zap.String("id", id), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get cluster resources"})
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
 // slugify converts a display name to a URL-safe slug.
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))

@@ -23,6 +23,7 @@ import type {
   ImageRegistry,
   RegistryTestResult,
   AppSettings,
+  SystemResources,
 } from '../types'
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
@@ -126,6 +127,11 @@ export interface CreateClusterPayload {
 
 export async function createCluster(payload: CreateClusterPayload): Promise<Cluster> {
   const { data } = await api.post<Cluster>('/clusters', payload)
+  return data
+}
+
+export async function getClusterResources(id: string): Promise<SystemResources> {
+  const { data } = await api.get<SystemResources>(`/clusters/${id}/resources`)
   return data
 }
 
