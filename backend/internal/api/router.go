@@ -16,6 +16,7 @@ func NewRouter(
 	s *store.Store,
 	bus *handlers.EventBus,
 	syncer handlers.ClusterSyncer,
+	version string,
 	logger *zap.Logger,
 ) *gin.Engine {
 	router := gin.New()
@@ -62,7 +63,10 @@ func NewRouter(
 		{
 			authProtected.POST("/refresh", authH.RefreshToken)
 			authProtected.GET("/me", authH.Me)
+			authProtected.GET("/users", middleware.RequireRole("admin"), authH.ListUsers)
 			authProtected.POST("/users", middleware.RequireRole("admin"), authH.CreateUser)
+			authProtected.PATCH("/users/:id", middleware.RequireRole("admin"), authH.UpdateUser)
+			authProtected.DELETE("/users/:id", middleware.RequireRole("admin"), authH.DeleteUser)
 		}
 	}
 	v1.Use(middleware.JWTAuth(cfg.JWTSecret))
@@ -142,6 +146,10 @@ func NewRouter(
 		registries.DELETE("/:id", middleware.RequireRole("admin"), registryH.DeleteRegistry)
 		registries.POST("/:id/test", middleware.RequireRole("operator"), registryH.TestRegistry)
 	}
+
+	// Settings — non-secret runtime config (admin only).
+	settingsH := handlers.NewSettingsHandler(cfg, version)
+	v1.GET("/settings", middleware.RequireRole("admin"), settingsH.GetSettings)
 
 	// Overview.
 	overviewH := handlers.NewOverviewHandler(s, logger)

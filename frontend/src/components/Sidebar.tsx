@@ -13,9 +13,11 @@ import {
   Plug,
   Network,
   Container,
+  Settings as SettingsIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useFindingSummary } from '../hooks/useFindings'
+import { useAuth } from '../contexts/AuthContext'
 
 interface NavItem {
   to: string
@@ -37,6 +39,7 @@ function CriticalBadge({ count }: { count: number }) {
 
 export function Sidebar() {
   const { data: summary } = useFindingSummary()
+  const { user } = useAuth()
 
   const criticalHighCount = summary
     ? (summary.critical || 0) + (summary.high || 0)
@@ -78,6 +81,9 @@ export function Sidebar() {
       tag: 'V2',
     },
     { to: '/integrations', icon: <Plug size={16} />, label: 'Integrations' },
+    ...(user?.role === 'admin'
+      ? [{ to: '/settings', icon: <SettingsIcon size={16} />, label: 'Settings' }]
+      : []),
   ]
 
   return (

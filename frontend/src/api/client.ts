@@ -22,6 +22,7 @@ import type {
   User,
   ImageRegistry,
   RegistryTestResult,
+  AppSettings,
 } from '../types'
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
@@ -58,6 +59,40 @@ export async function login(email: string, password: string): Promise<LoginRespo
 
 export async function getMe(): Promise<User> {
   const { data } = await api.get<User>('/auth/me')
+  return data
+}
+
+// Users (admin)
+export async function getUsers(): Promise<User[]> {
+  const { data } = await api.get<User[]>('/auth/users')
+  return data
+}
+
+export async function createUser(payload: {
+  email: string
+  name: string
+  password: string
+  role: string
+}): Promise<User> {
+  const { data } = await api.post<User>('/auth/users', payload)
+  return data
+}
+
+export async function updateUser(
+  id: string,
+  payload: { role?: string; is_active?: boolean }
+): Promise<User> {
+  const { data } = await api.patch<User>(`/auth/users/${id}`, payload)
+  return data
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  await api.delete(`/auth/users/${id}`)
+}
+
+// Settings (admin)
+export async function getSettings(): Promise<AppSettings> {
+  const { data } = await api.get<AppSettings>('/settings')
   return data
 }
 

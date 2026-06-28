@@ -84,7 +84,7 @@ func runServer() {
 	if cfg.LogLevel != "debug" {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	router := api.NewRouter(cfg, s, bus, colMgr, logger)
+	router := api.NewRouter(cfg, s, bus, colMgr, version, logger)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,

@@ -14,6 +14,7 @@ import { Secrets } from './pages/Secrets'
 import { Clusters } from './pages/Clusters'
 import { ClusterDetail } from './pages/ClusterDetail'
 import { Registries } from './pages/Registries'
+import { Settings } from './pages/Settings'
 
 function ProtectedRoutes() {
   const { token, isLoading } = useAuth()
@@ -48,6 +49,7 @@ function ProtectedRoutes() {
           <Route path="/secrets" element={<Secrets />} />
           <Route path="/registries" element={<Registries />} />
           <Route path="/integrations" element={<Integrations />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="/clusters" element={<Clusters />} />
           <Route path="/clusters/:id" element={<ClusterDetail />} />
           <Route path="*" element={<Navigate to="/" replace />} />

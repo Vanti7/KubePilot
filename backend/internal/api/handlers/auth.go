@@ -173,6 +173,114 @@ func (h *AuthHandler) CreateUser(c *gin.Context) {
 	c.JSON(http.StatusCreated, user)
 }
 
+// ListUsers returns all user accounts (admin only).
+// GET /auth/users
+func (h *AuthHandler) ListUsers(c *gin.Context) {
+	var users []models.User
+	if err := h.store.DB.WithContext(c.Request.Context()).Order("created_at ASC").Find(&users).Error; err != nil {
+		h.logger.Error("list users", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list users"})
+		return
+	}
+	c.JSON(http.StatusOK, users)
+}
+
+type updateUserRequest struct {
+	Role     *string `json:"role"`
+	IsActive *bool   `json:"is_active"`
+}
+
+// UpdateUser changes a user's role and/or active state (admin only). Guards
+// against demoting or deactivating the last remaining active admin.
+// PATCH /auth/users/:id
+func (h *AuthHandler) UpdateUser(c *gin.Context) {
+	id := c.Param("id")
+	callerID, _ := c.Get(middleware.ContextKeyUserID)
+
+	var req updateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var user models.User
+	if err := h.store.DB.WithContext(c.Request.Context()).Where("id = ?", id).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	// Determine the resulting state to validate against the last-admin rule.
+	newRole := user.Role
+	if req.Role != nil {
+		if *req.Role != models.RoleAdmin && *req.Role != models.RoleOperator && *req.Role != models.RoleViewer {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role"})
+			return
+		}
+		newRole = *req.Role
+	}
+	newActive := user.IsActive
+	if req.IsActive != nil {
+		newActive = *req.IsActive
+	}
+
+	losesAdmin := user.Role == models.RoleAdmin && (newRole != models.RoleAdmin || !newActive)
+	if losesAdmin && h.countActiveAdmins(c) <= 1 {
+		c.JSON(http.StatusConflict, gin.H{"error": "cannot demote or deactivate the last active admin"})
+		return
+	}
+	if user.ID.String() == callerID && !newActive {
+		c.JSON(http.StatusConflict, gin.H{"error": "you cannot deactivate your own account"})
+		return
+	}
+
+	updates := map[string]any{"role": newRole, "is_active": newActive}
+	if err := h.store.DB.WithContext(c.Request.Context()).Model(&user).Updates(updates).Error; err != nil {
+		h.logger.Error("update user", zap.String("id", id), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update user"})
+		return
+	}
+	c.JSON(http.StatusOK, user)
+}
+
+// DeleteUser removes a user account (admin only). Guards against deleting the
+// caller's own account or the last active admin.
+// DELETE /auth/users/:id
+func (h *AuthHandler) DeleteUser(c *gin.Context) {
+	id := c.Param("id")
+	callerID, _ := c.Get(middleware.ContextKeyUserID)
+	if id == callerID {
+		c.JSON(http.StatusConflict, gin.H{"error": "you cannot delete your own account"})
+		return
+	}
+
+	var user models.User
+	if err := h.store.DB.WithContext(c.Request.Context()).Where("id = ?", id).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	if user.Role == models.RoleAdmin && user.IsActive && h.countActiveAdmins(c) <= 1 {
+		c.JSON(http.StatusConflict, gin.H{"error": "cannot delete the last active admin"})
+		return
+	}
+
+	if err := h.store.DB.WithContext(c.Request.Context()).Delete(&models.User{}, "id = ?", id).Error; err != nil {
+		h.logger.Error("delete user", zap.String("id", id), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete user"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// countActiveAdmins returns the number of active admin accounts.
+func (h *AuthHandler) countActiveAdmins(c *gin.Context) int64 {
+	var n int64
+	h.store.DB.WithContext(c.Request.Context()).
+		Model(&models.User{}).
+		Where("role = ? AND is_active = ?", models.RoleAdmin, true).
+		Count(&n)
+	return n
+}
+
 type setupRequest struct {
 	Email    string `json:"email"    binding:"required,email"`
 	Password string `json:"password" binding:"required,min=8"`

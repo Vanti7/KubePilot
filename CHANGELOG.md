@@ -22,6 +22,10 @@ Versioning selon [Semantic Versioning 2.0.0](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 ### Added
+- **Page Settings** (`/settings`, entrée sidebar réservée aux admins) — gestion des utilisateurs et infos système, accès restreint au rôle `admin`
+  - **Onglet Users** : liste, création, changement de rôle (admin/operator/viewer), activation/désactivation et suppression des comptes. Garde-fous : impossible de rétrograder/désactiver/supprimer le **dernier admin actif** ni son **propre** compte
+  - **API** : `GET /api/v1/auth/users`, `PATCH /api/v1/auth/users/:id` (rôle / `is_active`), `DELETE /api/v1/auth/users/:id` — admin only
+  - **Onglet System** : configuration runtime non sensible (version, drivers storage/cache, local/demo/in-cluster, intervalle de collecte, rétention des métriques, MCP) via le nouvel endpoint `GET /api/v1/settings` (admin only) — **aucun secret exposé** (JWT, DB URL, identifiants SSH/registry jamais renvoyés)
 - **Gestion des registries privés** : nouvelle page **Registries** (`/registries`, entrée sidebar) pour configurer identifiants et TLS des registres privés/self-signed (Harbor, GHCR, Quay, ECR, GCR, ACR, OCI générique) — sans quoi le watcher d'images ne pouvait scanner que les registres publics et ne produisait aucun finding pour ces images
   - **API** : `GET/POST/PUT/DELETE /api/v1/registries` + `POST /api/v1/registries/:id/test` (sonde `GET /v2/` avec auth → joignabilité). Écriture réservée `operator`/`admin`. Les identifiants ne sont **jamais** renvoyés par l'API (seulement `username` + `has_credentials`)
   - **Rattachement automatique** : les `container_images` sont liées à un registre configuré par host (à la collecte et lors de la création/màj d'un registre) ; le watcher utilise alors ses identifiants (basic auth) et son réglage TLS

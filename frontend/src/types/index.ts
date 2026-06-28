@@ -339,4 +339,20 @@ export interface User {
   email: string
   name: string
   role: string
+  is_active?: boolean
+  last_login_at?: string | null
+  created_at?: string
+}
+
+export interface AppSettings {
+  version: string
+  storage_driver: string
+  cache_driver: string
+  local_mode: boolean
+  demo_mode: boolean
+  in_cluster: boolean
+  worker_interval_seconds: number
+  node_metrics_enabled: boolean
+  node_metrics_retention_hours: number
+  mcp_allow_writes: boolean
 }
