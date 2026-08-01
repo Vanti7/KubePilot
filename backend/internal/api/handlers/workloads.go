@@ -23,14 +23,14 @@ type ClientsetProvider interface {
 
 // WorkloadHandler handles workload endpoints.
 type WorkloadHandler struct {
-	store  *store.Store
-	k8s    ClientsetProvider
-	logger *zap.Logger
+	store   *store.Store
+	cluster ClusterOps
+	logger  *zap.Logger
 }
 
 // NewWorkloadHandler creates a new WorkloadHandler.
-func NewWorkloadHandler(s *store.Store, k8s ClientsetProvider, logger *zap.Logger) *WorkloadHandler {
-	return &WorkloadHandler{store: s, k8s: k8s, logger: logger}
+func NewWorkloadHandler(s *store.Store, cluster ClusterOps, logger *zap.Logger) *WorkloadHandler {
+	return &WorkloadHandler{store: s, cluster: cluster, logger: logger}
 }
 
 // ListWorkloads returns paginated workloads with optional filters.
@@ -136,7 +136,7 @@ func (h *WorkloadHandler) ScaleWorkload(c *gin.Context) {
 		return
 	}
 
-	clientset, ok := h.k8s.GetClientset(workload.ClusterID.String())
+	clientset, ok := h.cluster.GetClientset(workload.ClusterID.String())
 	if !ok {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "cluster is not currently connected"})
 		return
@@ -159,6 +159,11 @@ func (h *WorkloadHandler) ScaleWorkload(c *gin.Context) {
 		return
 	}
 
+	// Workloads are only polled every 60s otherwise (no live Watch, unlike
+	// namespaces/nodes/secrets) — kick an immediate pass so replicas_desired
+	// reflects the change within seconds instead of up to a minute later.
+	h.cluster.TriggerSync(workload.ClusterID.String())
+
 	c.JSON(http.StatusOK, gin.H{"id": id, "replicas": replicas})
 }
 
@@ -179,7 +184,7 @@ func (h *WorkloadHandler) RestartWorkload(c *gin.Context) {
 		return
 	}
 
-	clientset, ok := h.k8s.GetClientset(workload.ClusterID.String())
+	clientset, ok := h.cluster.GetClientset(workload.ClusterID.String())
 	if !ok {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "cluster is not currently connected"})
 		return
@@ -200,6 +205,10 @@ func (h *WorkloadHandler) RestartWorkload(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to restart workload"})
 		return
 	}
+
+	// So replicas_ready reflects the rollout in progress instead of waiting
+	// for the next periodic pass (see the same comment in ScaleWorkload).
+	h.cluster.TriggerSync(workload.ClusterID.String())
 
 	c.JSON(http.StatusOK, gin.H{"id": id})
 }

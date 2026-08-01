@@ -114,6 +114,18 @@ export function Inventory() {
   const [activeWorkload, setActiveWorkload] = useState<Workload | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
+  // Workloads are only re-polled by the backend collector every 60s (no live
+  // Watch, unlike namespaces/nodes/secrets) — the scale/restart endpoints
+  // kick an immediate collection pass, but it still runs in the background
+  // after the response comes back, so a single invalidate right away can
+  // still refetch the pre-change row. Re-invalidate a couple more times over
+  // the next few seconds to catch up once that pass lands.
+  function refreshWorkloadsSoon() {
+    qc.invalidateQueries({ queryKey: ['workloads'] })
+    setTimeout(() => qc.invalidateQueries({ queryKey: ['workloads'] }), 1500)
+    setTimeout(() => qc.invalidateQueries({ queryKey: ['workloads'] }), 4000)
+  }
+
   async function handleScale(w: Workload) {
     const input = window.prompt(`New replica count for ${w.name}`, String(w.replicas_desired))
     if (input === null) return
@@ -125,7 +137,7 @@ export function Inventory() {
     setBusyId(w.id)
     try {
       await scaleWorkload(w.id, replicas)
-      await qc.invalidateQueries({ queryKey: ['workloads'] })
+      refreshWorkloadsSoon()
     } catch (e: any) {
       alert(e?.response?.data?.error || e.message)
     } finally {
@@ -138,7 +150,7 @@ export function Inventory() {
     setBusyId(w.id)
     try {
       await restartWorkload(w.id)
-      await qc.invalidateQueries({ queryKey: ['workloads'] })
+      refreshWorkloadsSoon()
     } catch (e: any) {
       alert(e?.response?.data?.error || e.message)
     } finally {
