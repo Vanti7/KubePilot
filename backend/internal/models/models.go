@@ -274,6 +274,21 @@ type ImageRegistry struct {
 	UpdatedAt      time.Time      `                                                      json:"updated_at"`
 }
 
+// HelmRepository is a chart repository the Helm watcher searches to resolve the
+// origin of an installed release. Helm 3 release secrets record the chart name
+// and version but not the repository it came from, so the link has to be
+// rebuilt by looking the chart up in known repositories.
+type HelmRepository struct {
+	ID          uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
+	Name        string         `gorm:"uniqueIndex;not null"                           json:"name"`
+	URL         string         `gorm:"uniqueIndex;not null"                           json:"url"`
+	AuthConfig  datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"-"`
+	TLSInsecure bool           `gorm:"default:false"                                  json:"tls_insecure"`
+	BuiltIn     bool           `gorm:"default:false"                                  json:"built_in"`
+	CreatedAt   time.Time      `                                                      json:"created_at"`
+	UpdatedAt   time.Time      `                                                      json:"updated_at"`
+}
+
 // ImageTagObservation records a tag observed in a registry at a point in time.
 type ImageTagObservation struct {
 	ID          uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
@@ -490,6 +505,7 @@ func AllModels() []interface{} {
 		&ImageTagObservation{},
 		&Secret{},
 		&HelmRelease{},
+		&HelmRepository{},
 		&UpdateFinding{},
 		&RiskScore{},
 		&Ownership{},

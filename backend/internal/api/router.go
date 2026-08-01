@@ -149,6 +149,17 @@ func NewRouter(
 		registries.POST("/:id/test", middleware.RequireRole("operator"), registryH.TestRegistry)
 	}
 
+	// Helm chart repositories — used to resolve where an installed chart came from.
+	helmRepoH := handlers.NewHelmRepositoryHandler(s, logger)
+	helmRepos := v1.Group("/helm-repositories")
+	{
+		helmRepos.GET("", helmRepoH.ListHelmRepositories)
+		helmRepos.POST("", middleware.RequireRole("operator"), helmRepoH.CreateHelmRepository)
+		helmRepos.PUT("/:id", middleware.RequireRole("operator"), helmRepoH.UpdateHelmRepository)
+		helmRepos.DELETE("/:id", middleware.RequireRole("admin"), helmRepoH.DeleteHelmRepository)
+		helmRepos.POST("/:id/test", middleware.RequireRole("operator"), helmRepoH.TestHelmRepository)
+	}
+
 	// Settings — non-secret runtime config (admin only).
 	settingsH := handlers.NewSettingsHandler(cfg, version)
 	v1.GET("/settings", middleware.RequireRole("admin"), settingsH.GetSettings)

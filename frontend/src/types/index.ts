@@ -283,6 +283,24 @@ export interface RegistryTestResult {
   message: string
 }
 
+export interface HelmRepository {
+  id: string
+  name: string
+  url: string
+  username?: string
+  has_credentials: boolean
+  tls_insecure: boolean
+  built_in: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface HelmRepositoryTestResult {
+  ok: boolean
+  charts: number
+  message: string
+}
+
 export interface FindingFilter {
   severity?: Severity[]
   status?: FindingStatus[]

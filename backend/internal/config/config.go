@@ -30,6 +30,11 @@ type Config struct {
 	NodeMetricsEnabled        bool
 	NodeMetricsRetentionHours int
 
+	// HelmAutodiscover lets the Helm watcher fall back to Artifact Hub to find
+	// which repository an installed chart came from, when none of the configured
+	// repositories carries it. Disable it to keep chart resolution fully offline.
+	HelmAutodiscover bool
+
 	// Storage backend selection.
 	// StorageDriver is "postgres" or "sqlite". CacheDriver is "redis" or "memory".
 	// When unset, sensible defaults are derived from LocalMode / DB_URL (see Load).
@@ -118,6 +123,7 @@ func Load() *Config {
 		HeadlampURL:    getEnv("HEADLAMP_URL", ""),
 		TLSInsecure:    getBoolEnv("TLS_INSECURE", false),
 		WorkerInterval: getIntEnv("WORKER_INTERVAL_SECONDS", 300),
+		HelmAutodiscover:          getBoolEnv("HELM_AUTODISCOVER", true),
 		NodeMetricsEnabled:        getBoolEnv("NODE_METRICS_ENABLED", true),
 		NodeMetricsRetentionHours: getIntEnv("NODE_METRICS_RETENTION_HOURS", 168),
 		StorageDriver:  storageDriver,

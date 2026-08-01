@@ -81,11 +81,13 @@ func (s *Store) UpsertHelmRelease(ctx context.Context, release *models.HelmRelea
 				{Name: "namespace_name"},
 				{Name: "name"},
 			},
+			// repo_url is deliberately absent: it is resolved by the Helm watcher,
+			// not by the collector (a Helm release secret does not record its
+			// origin), so re-collecting must not wipe it.
 			DoUpdates: clause.AssignmentColumns([]string{
 				"chart_name",
 				"chart_version",
 				"app_version",
-				"repo_url",
 				"status",
 				"revision",
 				"values",
@@ -104,12 +106,11 @@ func (s *Store) DeleteHelmReleasesNotSeenSince(ctx context.Context, clusterID st
 		Delete(&models.HelmRelease{}).Error
 }
 
-// ListAllHelmReleases returns all Helm releases with a repo URL (used by helm watcher).
+// ListAllHelmReleases returns every Helm release (used by the helm watcher,
+// which resolves the repository itself when repo_url is still empty).
 func (s *Store) ListAllHelmReleases(ctx context.Context) ([]models.HelmRelease, error) {
 	var releases []models.HelmRelease
-	result := s.DB.WithContext(ctx).
-		Where("repo_url != ''").
-		Find(&releases)
+	result := s.DB.WithContext(ctx).Find(&releases)
 	return releases, result.Error
 }
 

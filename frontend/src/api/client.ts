@@ -22,6 +22,8 @@ import type {
   User,
   ImageRegistry,
   RegistryTestResult,
+  HelmRepository,
+  HelmRepositoryTestResult,
   AppSettings,
   SystemResources,
 } from '../types'
@@ -305,6 +307,40 @@ export async function testRegistry(id: string): Promise<RegistryTestResult> {
 
 export async function deleteRegistry(id: string): Promise<void> {
   await api.delete(`/registries/${id}`)
+}
+
+// Helm chart repositories — used to resolve which repository an installed chart
+// came from, since a Helm release does not record its own origin.
+export interface HelmRepositoryPayload {
+  name: string
+  url: string
+  username?: string
+  password?: string
+  tls_insecure?: boolean
+}
+
+export async function getHelmRepositories(): Promise<HelmRepository[]> {
+  const { data } = await api.get<HelmRepository[]>('/helm-repositories')
+  return data
+}
+
+export async function createHelmRepository(payload: HelmRepositoryPayload): Promise<HelmRepository> {
+  const { data } = await api.post<HelmRepository>('/helm-repositories', payload)
+  return data
+}
+
+export async function updateHelmRepository(id: string, payload: HelmRepositoryPayload): Promise<HelmRepository> {
+  const { data } = await api.put<HelmRepository>(`/helm-repositories/${id}`, payload)
+  return data
+}
+
+export async function testHelmRepository(id: string): Promise<HelmRepositoryTestResult> {
+  const { data } = await api.post<HelmRepositoryTestResult>(`/helm-repositories/${id}/test`)
+  return data
+}
+
+export async function deleteHelmRepository(id: string): Promise<void> {
+  await api.delete(`/helm-repositories/${id}`)
 }
 
 export default api

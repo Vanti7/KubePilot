@@ -26,6 +26,9 @@ func Run(ctx context.Context, db *gorm.DB, cfg *config.Config, logger *zap.Logge
 	if err := ensureEnvironments(ctx, db, logger); err != nil {
 		return fmt.Errorf("ensure environments: %w", err)
 	}
+	if err := ensureHelmRepositories(ctx, db, logger); err != nil {
+		return fmt.Errorf("ensure helm repositories: %w", err)
+	}
 	if err := ensureAdminUser(ctx, db, cfg, logger); err != nil {
 		return fmt.Errorf("ensure admin user: %w", err)
 	}
@@ -74,6 +77,54 @@ func ensureEnvironments(ctx context.Context, db *gorm.DB, logger *zap.Logger) er
 		return err
 	}
 	logger.Info("seeded default environments")
+	return nil
+}
+
+// defaultHelmRepositories are seeded on first run so that chart resolution works
+// out of the box for the repositories homelab and platform clusters most often
+// install from. Users can remove them or add their own, including private ones.
+//
+// Aggregators such as Bitnami are deliberately absent: their index.yaml runs to
+// tens of megabytes, which the watcher refuses to download (maxIndexBytes), and
+// their generically-named charts are exactly the ones version confirmation has
+// to disambiguate anyway.
+var defaultHelmRepositories = []struct{ Name, URL string }{
+	{"argo", "https://argoproj.github.io/argo-helm"},
+	{"cert-manager", "https://charts.jetstack.io"},
+	{"grafana", "https://grafana.github.io/helm-charts"},
+	{"harbor", "https://helm.goharbor.io"},
+	{"headlamp", "https://kubernetes-sigs.github.io/headlamp/"},
+	{"ingress-nginx", "https://kubernetes.github.io/ingress-nginx"},
+	{"longhorn", "https://charts.longhorn.io"},
+	{"metrics-server", "https://kubernetes-sigs.github.io/metrics-server/"},
+	{"prometheus-community", "https://prometheus-community.github.io/helm-charts"},
+	{"traefik", "https://traefik.github.io/charts"},
+}
+
+// ensureHelmRepositories seeds the built-in chart repositories if the table is
+// empty. Only when empty: a repository the user deleted must not reappear on the
+// next restart.
+func ensureHelmRepositories(ctx context.Context, db *gorm.DB, logger *zap.Logger) error {
+	var count int64
+	db.WithContext(ctx).Model(&models.HelmRepository{}).Count(&count)
+	if count > 0 {
+		return nil
+	}
+
+	repos := make([]models.HelmRepository, 0, len(defaultHelmRepositories))
+	for _, d := range defaultHelmRepositories {
+		repos = append(repos, models.HelmRepository{
+			ID:      uuid.New(),
+			Name:    d.Name,
+			URL:     d.URL,
+			BuiltIn: true,
+		})
+	}
+
+	if err := db.WithContext(ctx).Create(&repos).Error; err != nil {
+		return err
+	}
+	logger.Info("seeded default helm repositories", zap.Int("count", len(repos)))
 	return nil
 }
 

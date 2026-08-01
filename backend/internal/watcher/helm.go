@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,23 +20,41 @@ import (
 
 const helmIndexCacheTTL = 30 * time.Minute
 
+// maxIndexBytes caps how large an index.yaml we are willing to download and hold
+// in the cache. Aggregator repositories (Bitnami and friends) publish indexes of
+// tens of megabytes, which is more than a desktop install should spend on
+// resolving one chart.
+const maxIndexBytes = 10 << 20
+
 // HelmWatcher polls Helm chart repositories for newer chart versions.
 type HelmWatcher struct {
-	store      *store.Store
-	httpClient *http.Client
-	logger     *zap.Logger
-	stopCh     chan struct{}
+	store          *store.Store
+	httpClient     *http.Client
+	insecureClient *http.Client
+	autodiscover   bool
+	logger         *zap.Logger
+	stopCh         chan struct{}
 }
 
-// NewHelmWatcher creates a new HelmWatcher.
-func NewHelmWatcher(s *store.Store, logger *zap.Logger) *HelmWatcher {
+// NewHelmWatcher creates a new HelmWatcher. autodiscover allows falling back to
+// Artifact Hub when no configured repository carries an installed chart.
+func NewHelmWatcher(s *store.Store, logger *zap.Logger, autodiscover bool) *HelmWatcher {
 	return &HelmWatcher{
 		store: s,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		logger: logger,
-		stopCh: make(chan struct{}),
+		// Used only for repositories explicitly marked tls_insecure (self-hosted
+		// ChartMuseum & co); never used for public repositories.
+		insecureClient: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		},
+		autodiscover: autodiscover,
+		logger:       logger,
+		stopCh:       make(chan struct{}),
 	}
 }
 
@@ -87,10 +106,27 @@ func (hw *HelmWatcher) check(ctx context.Context) {
 // CheckRelease fetches the repo index and creates an UpdateFinding if a newer chart version exists.
 func (hw *HelmWatcher) CheckRelease(ctx context.Context, release *models.HelmRelease) error {
 	if release.RepoURL == "" {
-		return nil
+		repoURL := hw.resolveRepoURL(ctx, release)
+		if repoURL == "" {
+			// No known repository publishes this chart — nothing to compare against.
+			hw.logger.Debug("helm watcher: unresolved chart repository",
+				zap.String("release", release.Name),
+				zap.String("chart", release.ChartName),
+			)
+			return nil
+		}
+		release.RepoURL = repoURL
+		if err := hw.store.SetHelmReleaseRepoURL(ctx, release.ID, repoURL); err != nil {
+			hw.logger.Warn("persist resolved repo url",
+				zap.String("release", release.Name), zap.Error(err))
+		}
 	}
 
-	index, err := hw.fetchIndex(ctx, release.RepoURL)
+	// A configured repository may carry credentials or a TLS exception; an
+	// autodiscovered one is public and resolves to nil here.
+	repo, _ := hw.store.GetHelmRepositoryByURL(ctx, release.RepoURL)
+
+	index, err := hw.fetchIndex(ctx, release.RepoURL, repo)
 	if err != nil {
 		return fmt.Errorf("fetch index from %s: %w", release.RepoURL, err)
 	}
@@ -150,16 +186,19 @@ type helmIndex struct {
 	Entries map[string][]helmChartEntry `yaml:"entries"`
 }
 
+// helmChartEntry keeps only the fields we compare on. Descriptions and
+// timestamps make up most of an index.yaml and every parsed index is held in the
+// cache, so they are deliberately dropped.
 type helmChartEntry struct {
-	Name        string    `yaml:"name"`
-	Version     string    `yaml:"version"`
-	AppVersion  string    `yaml:"appVersion"`
-	Description string    `yaml:"description"`
-	Created     time.Time `yaml:"created"`
+	Name       string `yaml:"name"`
+	Version    string `yaml:"version"`
+	AppVersion string `yaml:"appVersion"`
 }
 
-// fetchIndex retrieves and parses index.yaml from a Helm repo, using Redis as cache.
-func (hw *HelmWatcher) fetchIndex(ctx context.Context, repoURL string) (*helmIndex, error) {
+// fetchIndex retrieves and parses index.yaml from a Helm repo, using the shared
+// cache. repo carries optional credentials and TLS settings; it is nil for
+// public repositories that are not registered in KubePilot.
+func (hw *HelmWatcher) fetchIndex(ctx context.Context, repoURL string, repo *models.HelmRepository) (*helmIndex, error) {
 	cacheKey := "helmidx:" + repoURL
 
 	// Try cache.
@@ -179,7 +218,20 @@ func (hw *HelmWatcher) fetchIndex(ctx context.Context, repoURL string) (*helmInd
 		return nil, err
 	}
 
-	resp, err := hw.httpClient.Do(req)
+	client := hw.httpClient
+	if repo != nil {
+		if repo.TLSInsecure {
+			client = hw.insecureClient
+		}
+		var authCfg map[string]string
+		if err := json.Unmarshal(repo.AuthConfig, &authCfg); err == nil {
+			if u, ok := authCfg["username"]; ok && u != "" {
+				req.SetBasicAuth(u, authCfg["password"])
+			}
+		}
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -189,9 +241,14 @@ func (hw *HelmWatcher) fetchIndex(ctx context.Context, repoURL string) (*helmInd
 		return nil, fmt.Errorf("repo returned %d for %s", resp.StatusCode, indexURL)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10 MB cap
+	// Read one byte past the cap so a truncated index is reported as such
+	// instead of surfacing as a confusing YAML syntax error.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxIndexBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(body) > maxIndexBytes {
+		return nil, fmt.Errorf("index.yaml from %s exceeds %d MB", repoURL, maxIndexBytes>>20)
 	}
 
 	var idx helmIndex

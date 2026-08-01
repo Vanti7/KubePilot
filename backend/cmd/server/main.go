@@ -110,7 +110,7 @@ func runServer() {
 		workerInterval := time.Duration(cfg.WorkerInterval) * time.Second
 		go imgWatcher.Run(ctx, workerInterval)
 
-		helmWatcher = watcher.NewHelmWatcher(s, logger)
+		helmWatcher = watcher.NewHelmWatcher(s, logger, cfg.HelmAutodiscover)
 		go helmWatcher.Run(ctx, workerInterval)
 
 		scoreEngine := scoring.NewScoringEngine(s, logger)
