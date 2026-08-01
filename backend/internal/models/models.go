@@ -86,6 +86,12 @@ const (
 	ActionLogSync          = "sync"
 )
 
+// Action log outcome
+const (
+	ActionLogStatusSuccess = "success"
+	ActionLogStatusFailure = "failure"
+)
+
 // User roles
 const (
 	RoleAdmin    = "admin"
@@ -428,6 +434,7 @@ type ActionLog struct {
 	Action     string         `gorm:"not null"                                       json:"action"`
 	EntityType string         `gorm:"not null"                                       json:"entity_type"`
 	EntityID   string         `gorm:"not null"                                       json:"entity_id"`
+	Status     string         `gorm:"not null;default:'success';index"              json:"status"`
 	Details    datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"details,omitempty"`
 	IPAddress  string         `                                                      json:"ip_address,omitempty"`
 	UserAgent  string         `                                                      json:"user_agent,omitempty"`

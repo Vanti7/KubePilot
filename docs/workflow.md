@@ -18,6 +18,7 @@
 
 ## ✅ Fait récemment
 
+- [~] **Fondations audit trail** (2026-08-02) — `action_logs` interrogeable (`GET /api/v1/action-logs`, paginé/filtrable) + helper `handlers.RecordAction` (rôle via `middleware.RequireRole`, inchangé) ; pas encore branché sur un endpoint d'écriture réel (aucun n'existe). Premier test du package `store` (`action_logs_test.go`)
 - [x] **Métriques nœuds réparées en in-cluster** (2026-08-01) — le chart (dépôt `kubepilot-gitops`) n'accordait pas `nodes/proxy` : toutes les jauges restaient vides sans erreur. Corrigé et poussé sur `gitops/dev`
 - [x] **Findings Helm réels** (2026-08-01) — le watcher ne produisait rien : un secret de release Helm n'enregistre **pas** son dépôt d'origine, donc `repo_url` restait vide. Résolution par confirmation de version (dépôts configurables + 11 publics semés + repli Artifact Hub) → 4 findings réels sur Lab Cyllene
 - [x] **Faux positifs semver** (2026-08-01) — forme du tag + continuité des majeures, avec tests unitaires (`internal/watcher/tags_test.go`) : `mysql 8.0 → 9.7` (au lieu de `26.7`), `goharbor/redis-photon v2.14.3 → v2.15.1` (au lieu de `4.0`)
@@ -47,14 +48,21 @@
 - [x] Chaîne de déploiement opérationnelle : Jenkins → Harbor → ArgoCD (déployé en `v0.2.0-alpha.51`)
 - [x] RBAC : `get nodes/proxy` (+ `nodes/stats`, `nodes/metrics`) ajouté au rôle in-cluster **et** au rôle du token d'intégration (2026-08-01)
 - [x] `NODE_METRICS_*` et `HELM_AUTODISCOVER` exposés dans les values du chart
-- [ ] **Reste** : `envs/staging/values.yaml` n'a pas de `jwtSecret` → le rendu du chart échoue pour staging (`A jwtSecret is required`). Préexistant, à corriger avant de déployer staging
-- [ ] **Reste** : vérifier sur le cluster que les jauges nœuds se remplissent après la synchro ArgoCD
+- [x] Vérifié en direct sur `kubepilot-dev` : `node_metrics` se remplit réellement (CPU/RAM/disque des 4 nœuds, échantillons à ~1 min d'intervalle) après la synchro ArgoCD — voir incident ci-dessous, il a fallu débloquer le rollout au passage
+- ~~`envs/staging/values.yaml` sans `jwtSecret`~~ : non pertinent pour l'instant — **staging et prod n'existent pas encore**, seul `dev` est utilisé. À traiter le jour où staging est réellement déployé.
+
+#### Incident annexe découvert et corrigé en vérifiant (2026-08-01, cluster Lab Cyllene, namespace `kubepilot-dev`)
+Le rollout déclenché par notre push RBAC est resté bloqué sur deux problèmes **sans rapport avec le RBAC**, révélant que cet environnement tournait sur `v0.1.0-alpha.48` depuis **66 jours** (tous les rollouts suivants échouaient silencieusement) :
+1. **`kubepilot-dev/harbor-registry-secret` périmé** (robot `$buildbot`, jamais rafraîchi depuis sa création le 24 mai) → `401` au pull. Ce secret n'est **pas géré par ArgoCD** (créé manuellement, cf. commentaire dans `values.yaml` du chart gitops) donc rien ne le resynchronise automatiquement. Corrigé en recopiant le `dockerconfigjson` valide de `ci-cd/harbor-kubepilot-credentials` (même robot account, secret différent, plus récent).
+2. **507 lignes en double dans `nodes`** (jusqu'à 166 par nœud) — accumulées par l'ancien build qui n'avait pas encore le fix `ON CONFLICT` de `UpsertNode` (déjà corrigé dans le code actuel, cf. commentaire `internal/store/clusters.go:104` — pas une régression à craindre). Ces doublons faisaient échouer la création de l'index unique `uq_node` par l'`AutoMigrate` de la nouvelle version, qui elle applique enfin cette contrainte. Doublons supprimés (garder la ligne la plus récente par `cluster_id,name`), après avoir mis à zéro l'ancien ReplicaSet qui les recréait en boucle à chaque cycle de collecte.
+
+**Leçon** : un environnement in-cluster qui accumule un retard de déploiement (ici via un secret non-géré par Argo) peut aussi accumuler des dérives de données qui ne surviennent qu'au moment où on rattrape enfin le retard — l'incident de RBAC a bien été corrigé, mais sa vérification a débusqué deux problèmes plus anciens et plus sérieux.
 
 ### 3. Ensuite — Pilotage MVP *(cœur de la vision, via l'API server)*
 - [ ] Deploy d'un manifest (server-side apply)
 - [ ] Édition `values.yaml` Helm + upgrade/rollback (Helm SDK Go)
 - [ ] Scale / rolling-restart / edit ressource
-- [ ] Journalisation des actions (`action_logs`) + garde-fous (rôles)
+- [~] Journalisation des actions (`action_logs`) + garde-fous (rôles) — fondations posées : table interrogeable (`GET /api/v1/action-logs`) + helper `handlers.RecordAction` ; reste à brancher sur deploy/scale/helm-upgrade une fois ces endpoints construits
 
 ### 4. Plus tard — Agent hôte *(ancre in-cluster)*
 - [ ] Inventaire OS/packages des nœuds (DaemonSet)
@@ -62,7 +70,7 @@
 - [ ] Actions hôte (patch OS, reboot, drain) — séparable, V2/V3
 
 ### En continu
-- [~] Tests backend — `internal/watcher/tags_test.go` fait (comparaison semver) ; **reste** scoring engine + store
+- [~] Tests backend — `internal/watcher/tags_test.go` (comparaison semver) + `internal/store/action_logs_test.go` (premier test du package `store`) faits ; **reste** scoring engine + le reste du store
 - [x] Page Settings (utilisateurs, infos système)
 - [ ] Page History (audit log)
 - [x] UI registries privés (Harbor, ECR, GCR, ACR) + dépôts de charts Helm
@@ -94,5 +102,5 @@ cd frontend; $env:VITE_PROXY_TARGET="http://localhost:8090"; npm run dev -- --po
 ## 📌 Rappels process
 
 - **Changelog obligatoire** : toute modif notable → section `[Unreleased]` du `CHANGELOG.md`.
-- **Versioning** : SemVer + cycle alpha/beta/rc/stable (cf. CLAUDE.md). Version courante : `v0.2.0-alpha.2`.
+- **Versioning** : SemVer + cycle alpha/beta/rc/stable (cf. CLAUDE.md). Version courante : `v0.2.0-alpha.3`.
 - **Commits** : Conventional Commits (`type(scope): message`).

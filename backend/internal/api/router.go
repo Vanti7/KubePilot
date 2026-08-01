@@ -164,6 +164,12 @@ func NewRouter(
 	settingsH := handlers.NewSettingsHandler(cfg, version)
 	v1.GET("/settings", middleware.RequireRole("admin"), settingsH.GetSettings)
 
+	// Action logs — audit trail (read-only endpoint; the write side is the
+	// handlers.RecordAction helper other handlers call directly in-process,
+	// not an HTTP endpoint).
+	actionLogH := handlers.NewActionLogHandler(s, logger)
+	v1.GET("/action-logs", actionLogH.ListActionLogs)
+
 	// Overview.
 	overviewH := handlers.NewOverviewHandler(s, logger)
 	v1.GET("/overview", overviewH.GetOverview)

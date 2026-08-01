@@ -81,7 +81,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ## État actuel du projet
 
-**Version courante** : `v0.2.0-alpha.2` (2026-08-01)
+**Version courante** : `v0.2.0-alpha.3` (2026-08-02)
 **Canal** : alpha
 **Branche principale** : `main`
 
@@ -93,8 +93,9 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 - [x] 19 modèles GORM avec UUID, JSONB, enums (`internal/models`)
 - [x] Migration SQL initiale (`migrations/001_initial.sql`)
 - [x] Store — CRUD clusters, findings, workloads, helm releases, nodes (`internal/store`)
-- [x] API REST Gin — 14 groupes d'endpoints + SSE (`internal/api`)
+- [x] API REST Gin — 15 groupes d'endpoints + SSE (`internal/api`)
 - [x] Middleware JWT auth + RBAC par rôle (`internal/api/middleware`)
+- [x] Piste d'audit `action_logs` interrogeable (`GET /api/v1/action-logs`) + helper `handlers.RecordAction` — fondations pour les futurs endpoints d'écriture (deploy/scale/helm-upgrade), aucun n'existe encore
 - [x] Bootstrap first-run — seed environments, création admin, auto-enregistrement cluster local (`internal/bootstrap`)
 - [x] K8s Collector — Watch API Deployments/DaemonSets/StatefulSets/Nodes/Namespaces + décodage secrets Helm (`internal/collector`)
 - [x] Image Watcher — polling OCI registry, semver comparison, cache Redis (`internal/watcher/image.go`)
