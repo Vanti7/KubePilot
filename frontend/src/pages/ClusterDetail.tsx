@@ -94,15 +94,15 @@ export function ClusterDetail() {
       key: 'severity',
       header: 'Sev',
       width: '70px',
-      render: (f) => f.risk_score ? <SeverityBadge severity={f.risk_score.severity} /> : <span className="text-slate-600">—</span>,
+      render: (f) => f.score_severity || f.severity ? <SeverityBadge severity={f.score_severity || f.severity} /> : <span className="text-slate-600">—</span>,
     },
     {
       key: 'resource',
       header: 'Resource',
       render: (f) => (
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-slate-200 font-medium">{f.workload_name || f.target_id}</span>
-          <span className="text-xs text-slate-500">{f.target_kind}</span>
+          <span className="text-xs text-slate-200 font-medium">{f.workload_name || f.helm_release_name || f.title}</span>
+          <span className="text-xs text-slate-500">{f.workload_kind}</span>
         </div>
       ),
     },
@@ -122,8 +122,8 @@ export function ClusterDetail() {
       width: '60px',
       align: 'right',
       render: (f) => (
-        <span className={clsx('font-mono text-xs', scoreToColor(f.risk_score?.score ?? 0))}>
-          {f.risk_score?.score ?? '—'}
+        <span className={clsx('font-mono text-xs', scoreToColor(f.score ?? 0))}>
+          {f.score ?? '—'}
         </span>
       ),
     },

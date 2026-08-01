@@ -34,46 +34,46 @@ function ScoreBar({ score }: { score: number }) {
 
 export function FindingDetail({ finding }: Props) {
   const headlampBase = import.meta.env.VITE_HEADLAMP_URL || 'http://localhost:4466'
-  const headlampURL = finding.cluster_name && finding.namespace_name
-    ? buildHeadlampURL(
-        headlampBase,
-        finding.cluster_name,
-        finding.namespace_name,
-        finding.target_kind,
-        finding.workload_name || finding.target_id
-      )
-    : null
+  // Helm findings carry no workload, so there is no Kubernetes resource to link to.
+  const headlampURL =
+    finding.cluster_name && finding.namespace_name && finding.workload_kind && finding.workload_name
+      ? buildHeadlampURL(
+          headlampBase,
+          finding.cluster_name,
+          finding.namespace_name,
+          finding.workload_kind,
+          finding.workload_name
+        )
+      : null
 
   function copyToClipboard(text: string) {
     navigator.clipboard.writeText(text).catch(() => {})
   }
 
-  const isHelm = finding.target_kind === 'HelmRelease'
-  const helmCommand = isHelm
-    ? `helm upgrade ${finding.workload_name} --version ${finding.latest_version} -n ${finding.namespace_name}`
-    : null
+  const isHelm = finding.kind === 'helm'
+  const helmCommand =
+    isHelm && finding.helm_release_name
+      ? `helm upgrade ${finding.helm_release_name} --version ${finding.latest_version} -n ${finding.namespace_name}`
+      : null
 
   return (
     <div className="p-4 space-y-5">
       {/* Header */}
       <div className="space-y-2">
         <div className="flex items-start gap-2 flex-wrap">
-          {finding.risk_score && <SeverityBadge severity={finding.risk_score.severity} size="md" />}
+          <SeverityBadge severity={finding.score_severity || finding.severity} size="md" />
           <span
             className={clsx('badge text-xs font-medium', UPDATE_TYPE_STYLES[finding.update_type])}
           >
             {updateTypeLabel(finding.update_type)}
           </span>
-          {finding.is_breaking && (
-            <span className="badge bg-red-950/80 text-red-400 border border-red-900/60 text-xs">
-              BREAKING
-            </span>
-          )}
         </div>
         <h3 className="text-base font-semibold text-slate-100">
-          {finding.workload_name || finding.target_id}
+          {finding.workload_name || finding.helm_release_name || finding.title}
         </h3>
-        <p className="text-xs text-slate-500 font-mono">{finding.target_kind}</p>
+        <p className="text-xs text-slate-500 font-mono">
+          {finding.workload_kind || (isHelm ? 'HelmRelease' : finding.kind)}
+        </p>
       </div>
 
       {/* Version */}
@@ -87,14 +87,14 @@ export function FindingDetail({ finding }: Props) {
       </div>
 
       {/* Risk Score */}
-      {finding.risk_score && (
+      {finding.score != null && (
         <div className="panel p-3 space-y-3">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Risk Score</div>
-          <ScoreBar score={finding.risk_score.score} />
-          {Object.keys(finding.risk_score.factors ?? {}).length > 0 && (
+          <ScoreBar score={finding.score} />
+          {Object.keys(finding.score_factors ?? {}).length > 0 && (
             <table className="w-full text-xs">
               <tbody>
-                {Object.entries(finding.risk_score.factors ?? {}).map(([factor, value]) => (
+                {Object.entries(finding.score_factors ?? {}).map(([factor, value]) => (
                   <tr key={factor} className="border-t border-surface-border/50">
                     <td className="py-1.5 text-slate-400 capitalize">{factor.replace(/_/g, ' ')}</td>
                     <td className="py-1.5 text-right">
@@ -158,24 +158,13 @@ export function FindingDetail({ finding }: Props) {
           <div className="flex items-center gap-2">
             <Clock size={12} className="text-slate-500 flex-shrink-0" />
             <span className="text-slate-400">Last confirmed</span>
-            <span className="text-slate-300">{formatRelative(finding.last_confirmed_at)}</span>
+            <span className="text-slate-300">{formatRelative(finding.last_observed_at)}</span>
           </div>
         </div>
       </div>
 
       {/* Actions */}
       <div className="space-y-2">
-        {finding.changelog_url && (
-          <a
-            href={finding.changelog_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-secondary w-full justify-center"
-          >
-            <ExternalLink size={14} />
-            View Changelog
-          </a>
-        )}
         {headlampURL && (
           <a
             href={headlampURL}

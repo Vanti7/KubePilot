@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kubepilot/backend/internal/models"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -27,7 +28,15 @@ type FindingWithScore struct {
 	Score        *float64 `json:"score,omitempty"`
 	ScoreSeverity string  `json:"score_severity,omitempty"`
 	WorkloadName string   `json:"workload_name,omitempty"`
+	// WorkloadKind is the Kubernetes kind (Deployment, DaemonSet, StatefulSet) —
+	// distinct from UpdateFinding.Kind, which is the finding type (image/helm).
+	// The UI needs it to build a resource link.
+	WorkloadKind string   `json:"workload_kind,omitempty"`
 	ClusterName  string   `json:"cluster_name,omitempty"`
+	// ScoreFactors is the per-factor breakdown behind Score, shown in the detail panel.
+	ScoreFactors datatypes.JSON `json:"score_factors,omitempty"`
+	// HelmReleaseName is set for helm findings, which have no workload to name.
+	HelmReleaseName string `json:"helm_release_name,omitempty"`
 }
 
 // FindingSummary holds counts of findings by severity.
@@ -78,7 +87,10 @@ func (s *Store) ListFindings(ctx context.Context, filter FindingFilter) ([]Findi
 		Score         *float64 `gorm:"column:score"`
 		ScoreSeverity string   `gorm:"column:score_severity"`
 		WorkloadName  string   `gorm:"column:workload_name"`
+		WorkloadKind  string   `gorm:"column:workload_kind"`
 		ClusterName   string   `gorm:"column:cluster_name"`
+		ScoreFactors  datatypes.JSON `gorm:"column:score_factors"`
+		HelmReleaseName string `gorm:"column:helm_release_name"`
 	}
 
 	rowsQ := s.DB.WithContext(ctx).
@@ -86,10 +98,14 @@ func (s *Store) ListFindings(ctx context.Context, filter FindingFilter) ([]Findi
 		Select(`uf.*,
 			rs.score,
 			rs.severity AS score_severity,
+			rs.factors  AS score_factors,
 			w.name  AS workload_name,
+			w.kind  AS workload_kind,
+			hr.name AS helm_release_name,
 			c.name  AS cluster_name`).
 		Joins("LEFT JOIN risk_scores rs ON rs.finding_id = uf.id").
 		Joins("LEFT JOIN workloads w  ON w.id  = uf.workload_id").
+		Joins("LEFT JOIN helm_releases hr ON hr.id = uf.helm_release_id").
 		Joins("LEFT JOIN clusters c  ON c.id  = uf.cluster_id")
 
 	if filter.ClusterID != "" {
@@ -125,7 +141,10 @@ func (s *Store) ListFindings(ctx context.Context, filter FindingFilter) ([]Findi
 			Score:         r.Score,
 			ScoreSeverity: r.ScoreSeverity,
 			WorkloadName:  r.WorkloadName,
+			WorkloadKind:  r.WorkloadKind,
 			ClusterName:   r.ClusterName,
+			ScoreFactors:  r.ScoreFactors,
+			HelmReleaseName: r.HelmReleaseName,
 		}
 	}
 	return out, total, nil

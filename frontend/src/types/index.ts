@@ -145,21 +145,31 @@ export interface HelmRelease {
   available_version?: string
 }
 
+// Mirrors store.FindingWithScore — the flat DTO returned by GET /api/v1/findings.
 export interface UpdateFinding {
   id: string
-  kind: string
-  target_id: string
-  target_kind: string
+  kind: string // finding type: 'image' | 'helm'
+  cluster_id: string
+  workload_id?: string
+  container_image_id?: string
+  helm_release_id?: string
+  title: string
+  description?: string
   current_version: string
   latest_version: string
   update_type: UpdateType
-  is_breaking: boolean
-  changelog_url: string
+  severity: Severity
   status: FindingStatus
   first_detected_at: string
-  last_confirmed_at: string
-  risk_score?: RiskScore
+  last_observed_at: string
+  cves?: string[]
+  metadata?: Record<string, any>
+  score?: number
+  score_severity?: Severity
+  score_factors?: Record<string, number>
   workload_name?: string
+  workload_kind?: string // Kubernetes kind: Deployment | DaemonSet | StatefulSet
+  helm_release_name?: string // set for helm findings, which have no workload
   cluster_name?: string
   namespace_name?: string
 }

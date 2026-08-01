@@ -5,7 +5,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Filter,
   ChevronDown,
-  ExternalLink,
   MoreHorizontal,
   Check,
   X,
@@ -168,8 +167,8 @@ export function Updates({ initialFilter }: { initialFilter?: Partial<FindingsFil
       width: '70px',
       sortable: true,
       render: (f) =>
-        f.risk_score ? (
-          <SeverityBadge severity={f.risk_score.severity} />
+        f.score_severity || f.severity ? (
+          <SeverityBadge severity={f.score_severity || f.severity} />
         ) : (
           <span className="text-slate-600 text-xs">—</span>
         ),
@@ -179,9 +178,9 @@ export function Updates({ initialFilter }: { initialFilter?: Partial<FindingsFil
       header: 'Resource',
       render: (f) => (
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-slate-200 text-xs font-medium">{f.workload_name || f.target_id}</span>
+          <span className="text-slate-200 text-xs font-medium">{f.workload_name || f.helm_release_name || f.title}</span>
           <span className="px-1 py-0.5 text-xs rounded bg-surface-elevated text-slate-500 border border-surface-border">
-            {f.target_kind}
+            {f.workload_kind}
           </span>
         </div>
       ),
@@ -198,11 +197,6 @@ export function Updates({ initialFilter }: { initialFilter?: Partial<FindingsFil
           <span className={clsx('px-1 py-0.5 text-xs rounded font-medium', UPDATE_TYPE_STYLES[f.update_type])}>
             {updateTypeLabel(f.update_type)}
           </span>
-          {f.is_breaking && (
-            <span className="px-1 py-0.5 text-xs rounded bg-red-950/80 text-red-400 border border-red-900/60 font-medium">
-              BREAK
-            </span>
-          )}
         </div>
       ),
     },
@@ -212,7 +206,7 @@ export function Updates({ initialFilter }: { initialFilter?: Partial<FindingsFil
       width: '90px',
       sortable: true,
       render: (f) => {
-        const score = f.risk_score?.score
+        const score = f.score
         return (
           <div className="flex items-center gap-1.5">
             <div className="w-12 h-1.5 bg-surface-elevated rounded-full overflow-hidden">
@@ -275,15 +269,6 @@ export function Updates({ initialFilter }: { initialFilter?: Partial<FindingsFil
               sideOffset={4}
               align="end"
             >
-              {f.changelog_url && (
-                <DropdownMenu.Item
-                  className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-surface-panel outline-none text-slate-300"
-                  onSelect={() => window.open(f.changelog_url, '_blank')}
-                >
-                  <ExternalLink size={13} />
-                  View changelog
-                </DropdownMenu.Item>
-              )}
               <DropdownMenu.Item
                 className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-surface-panel outline-none text-slate-300"
                 onSelect={() => updateFindingStatus(f.id, 'planned').then(() => qc.invalidateQueries({ queryKey: ['findings'] }))}
@@ -457,7 +442,7 @@ export function Updates({ initialFilter }: { initialFilter?: Partial<FindingsFil
       <SlideOver
         open={!!activeFinding}
         onClose={() => setActiveFinding(null)}
-        title={activeFinding ? (activeFinding.workload_name || activeFinding.target_id) : ''}
+        title={activeFinding ? (activeFinding.workload_name || activeFinding.helm_release_name || activeFinding.title) : ''}
         width="42%"
       >
         {activeFinding && <FindingDetail finding={activeFinding} />}

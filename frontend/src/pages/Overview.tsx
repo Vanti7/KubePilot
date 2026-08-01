@@ -58,15 +58,15 @@ export function Overview() {
       header: 'Sev',
       width: '70px',
       render: (f) =>
-        f.risk_score ? <SeverityBadge severity={f.risk_score.severity} /> : <span className="text-slate-600">—</span>,
+        f.score_severity || f.severity ? <SeverityBadge severity={f.score_severity || f.severity} /> : <span className="text-slate-600">—</span>,
     },
     {
       key: 'resource',
       header: 'Resource',
       render: (f) => (
         <div>
-          <span className="text-slate-200 font-medium text-xs">{f.workload_name || f.target_id}</span>
-          <span className="ml-1.5 text-xs text-slate-500">{f.target_kind}</span>
+          <span className="text-slate-200 font-medium text-xs">{f.workload_name || f.helm_release_name || f.title}</span>
+          <span className="ml-1.5 text-xs text-slate-500">{f.workload_kind}</span>
         </div>
       ),
     },
@@ -86,8 +86,8 @@ export function Overview() {
       width: '60px',
       align: 'right',
       render: (f) => (
-        <span className={clsx('font-mono text-xs font-semibold', scoreToColor(f.risk_score?.score ?? 0))}>
-          {f.risk_score?.score ?? '—'}
+        <span className={clsx('font-mono text-xs font-semibold', scoreToColor(f.score ?? 0))}>
+          {f.score ?? '—'}
         </span>
       ),
     },
