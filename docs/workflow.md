@@ -18,6 +18,9 @@
 
 ## ✅ Fait récemment
 
+- [x] **Chart Helm `helm/kubepilot/`** (2026-08-01) — (re)créé et validé (`helm lint`, `helm template`, `kubectl --dry-run=client`). SQLite+PVC par défaut (zéro dépendance), PostgreSQL/Redis via `externalPostgresql`/`externalRedis`, RBAC `nodes/proxy` pour les métriques
+- [x] **Findings Helm réels** (2026-08-01) — le watcher ne produisait rien : un secret de release Helm n'enregistre **pas** son dépôt d'origine, donc `repo_url` restait vide. Résolution par confirmation de version (dépôts configurables + 11 publics semés + repli Artifact Hub) → 4 findings réels sur Lab Cyllene
+- [x] **Faux positifs semver** (2026-08-01) — forme du tag + continuité des majeures, avec tests unitaires (`internal/watcher/tags_test.go`) : `mysql 8.0 → 9.7` (au lieu de `26.7`), `goharbor/redis-photon v2.14.3 → v2.15.1` (au lieu de `4.0`)
 - [x] **Findings d'image réels** (2026-08-01) — 5 bugs cumulés corrigés, validés contre le cluster Lab Cyllene : 20 findings réels remontés (Traefik, CoreDNS, kube-proxy, metrics-server, Harbor…). Voir `CHANGELOG.md` pour le détail
 - [x] Gestion des registries privés — page Registries, CRUD API, credentials + `tls_insecure` par registre
 - [x] Page Settings (users + infos système), export CSV des findings, command palette `Ctrl+K`, détail cluster enrichi
@@ -35,14 +38,14 @@
 - [x] TLS/CA par registre (Harbor self-signed, `tls_insecure` par registre)
 - [x] Nettoyage en cascade des `container_images` orphelines au `DeleteWorkloadsNotSeenSince`
 - [x] Vérifié de bout en bout : 20 findings image réels sur Lab Cyllene
-- [ ] **Reste** : faux positifs semver sur les repos à versionnage non-standard (`mysql 8.0 → 26.7`, `goharbor/redis-photon v2.14.3 → 4.0`) — `findNewerTag` prend tous les tags parsables au mot
-- [ ] **Reste** : valider un finding **Helm** réel (seul le chemin image est prouvé)
+- [x] Faux positifs semver corrigés (forme du tag + continuité des majeures) + tests unitaires
+- [x] Findings **Helm** réels validés : 4 sur Lab Cyllene (argo-cd, traefik, headlamp, metrics-server ; harbor déjà à jour)
 
-### 2. Prérequis tiering — Chart Helm
-> ⚠️ Listé « livré » dans CLAUDE.md mais **absent du repo** (`helm/`). Tout le tier in-cluster en dépend.
-- [ ] (Re)créer le chart `helm/kubepilot/` (deployment, SA, RBAC/ClusterRole, secret, ingress, NOTES)
-- [ ] RBAC : autoriser `get nodes/proxy` (+ `nodes/stats`) pour les métriques en in-cluster
-- [ ] Vérifier déploiement in-cluster (collecte persistante + historique)
+### 2. ~~Prérequis tiering — Chart Helm~~ ✅ *(fait le 2026-08-01)*
+- [x] Chart `helm/kubepilot/` créé : deployment backend+frontend, services, SA, RBAC/ClusterRole, secret, PVC, ingress, token d'intégration, NOTES
+- [x] RBAC : `get nodes/proxy` (+ `nodes/stats`, `nodes/metrics`) pour les métriques en in-cluster
+- [x] Validé `helm lint` + `helm template` (défaut SQLite, et PostgreSQL/Redis/Ingress) + `kubectl apply --dry-run=client`
+- [ ] **Reste** : déploiement in-cluster réel sur un cluster (images `ghcr.io/kubepilot/*` à publier d'abord — aucun pipeline de build/push n'existe encore)
 
 ### 3. Ensuite — Pilotage MVP *(cœur de la vision, via l'API server)*
 - [ ] Deploy d'un manifest (server-side apply)
@@ -56,16 +59,20 @@
 - [ ] Actions hôte (patch OS, reboot, drain) — séparable, V2/V3
 
 ### En continu
-- [ ] Tests backend (scoring engine, semver, store)
-- [ ] Page Settings (utilisateurs, variables globales)
+- [~] Tests backend — `internal/watcher/tags_test.go` fait (comparaison semver) ; **reste** scoring engine + store
+- [x] Page Settings (utilisateurs, infos système)
 - [ ] Page History (audit log)
-- [ ] UI registries privés (Harbor, ECR, GCR, ACR)
+- [x] UI registries privés (Harbor, ECR, GCR, ACR) + dépôts de charts Helm
+- [ ] CI : build/push des images `ghcr.io/kubepilot/{backend,frontend}` (bloque le déploiement in-cluster réel)
 
 ---
 
 ## 🧠 Décisions & notes
 
 - Métriques nœuds = **agentless** (kubelet), passe par le tunnel SSH ; l'agent custom n'est utile que pour l'inventaire OS/packages + CVE système + actions (→ in-cluster).
+- **Origine d'un chart Helm** : une release Helm 3 n'enregistre pas son dépôt. KubePilot le retrouve en cherchant le chart dans les dépôts connus et en **confirmant la version installée** dans leur `index.yaml` (sinon `harbor` de Bitnami serait confondu avec celui de goharbor). Repli Artifact Hub via `HELM_AUTODISCOVER`.
+- Le collector ne doit **jamais** écrire `repo_url` (il ne le connaît pas) : la colonne est exclue des `DoUpdates` de `UpsertHelmRelease`.
+- **Sévérité des findings = score de risque**, pas type de mise à jour : `updateTypeSeverity` n'est que la valeur initiale, le scoring engine la recalcule. Les findings Helm scorent bas (pas de workload → pas de facteurs exposition/replicas) — à revoir si on veut les faire remonter.
 - Statuts findings valides : `open, planned, ignored, approved, blocked, resolved`.
 - UUID assignés côté Go (callback GORM), pas `gen_random_uuid()` (compat SQLite).
 - Mode démo : ne **jamais** lancer les collectors/watchers/scoring (ils écraseraient/purgeraient le seed).
@@ -85,5 +92,5 @@ cd frontend; $env:VITE_PROXY_TARGET="http://localhost:8090"; npm run dev -- --po
 ## 📌 Rappels process
 
 - **Changelog obligatoire** : toute modif notable → section `[Unreleased]` du `CHANGELOG.md`.
-- **Versioning** : SemVer + cycle alpha/beta/rc/stable (cf. CLAUDE.md). Version courante : `v0.2.0-alpha.1`.
+- **Versioning** : SemVer + cycle alpha/beta/rc/stable (cf. CLAUDE.md). Version courante : `v0.2.0-alpha.2`.
 - **Commits** : Conventional Commits (`type(scope): message`).

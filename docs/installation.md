@@ -167,16 +167,19 @@ curl -X POST http://localhost:8080/api/v1/clusters \
 
 ### 2.2 Installation minimale
 
+Par défaut le chart n'a **aucune dépendance externe** : les données vont dans SQLite sur un PersistentVolume et le cache est en mémoire.
+
 ```bash
 helm install kubepilot ./helm/kubepilot \
   --namespace kubepilot \
   --create-namespace \
-  --set secret.jwtSecret="$(openssl rand -hex 32)" \
   --set admin.email="vous@domaine.com" \
   --set admin.password="VotreMotDePasse"
 ```
 
-> **Note** : si `admin.password` est omis, un mot de passe est auto-généré. Le récupérer depuis les logs (voir section 2.5).
+> **Note** : si `admin.email` est omis, aucun compte n'est pré-créé — l'écran de setup first-run s'affiche à la première ouverture de l'UI. Si seul `admin.password` est omis, un mot de passe est auto-généré et écrit dans les logs (voir section 2.5).
+>
+> `secret.jwtSecret` est **généré à l'install** et conservé entre les `helm upgrade` (annotation `helm.sh/resource-policy: keep` sur le Secret). Le fixer explicitement n'est nécessaire que pour partager la clé entre plusieurs instances.
 
 Après l'installation, Helm affiche les instructions de connexion :
 
@@ -184,14 +187,13 @@ Après l'installation, Helm affiche les instructions de connexion :
 kubectl port-forward -n kubepilot svc/kubepilot-frontend 3000:80
 ```
 
+> ⚠️ Avec `storage.driver: sqlite`, le backend ne doit **pas** être scalé (`replicaCount: 1`) : SQLite n'accepte qu'un seul writer et le cache mémoire est par pod. La stratégie de déploiement est forcée à `Recreate`. Pour plusieurs réplicas, passer à PostgreSQL + Redis (section 2.4).
+
 ### 2.3 Installation avec Ingress
 
 Créer un fichier `values-prod.yaml` :
 
 ```yaml
-secret:
-  jwtSecret: "votre-secret-32-chars-minimum"
-
 admin:
   email: "admin@votre-domaine.com"
   password: "VotreMotDePasseSecurise"
@@ -203,12 +205,19 @@ config:
   clusterName: "prod-principal"
   headlampURL: "https://headlamp.votre-domaine.com"
 
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClass: "longhorn"    # adapter à votre cluster
+
 ingress:
   enabled: true
-  className: "nginx"         # adapter à votre ingress controller
+  className: "nginx"          # adapter à votre ingress controller
   annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"   # pour SSE
+    # SSE : lecture longue et pas de buffering, sinon le flux temps réel est coupé
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
   hosts:
     - host: kubepilot.votre-domaine.com
       paths:
@@ -218,26 +227,6 @@ ingress:
     - secretName: kubepilot-tls
       hosts:
         - kubepilot.votre-domaine.com
-
-# PostgreSQL intégré (Bitnami)
-postgresql:
-  enabled: true
-  auth:
-    username: kubepilot
-    password: "MotDePassePostgres"
-    database: kubepilot
-  primary:
-    persistence:
-      enabled: true
-      size: 20Gi
-
-# Redis intégré (Bitnami)
-redis:
-  enabled: true
-  master:
-    persistence:
-      enabled: true
-      size: 2Gi
 ```
 
 ```bash
@@ -247,30 +236,29 @@ helm install kubepilot ./helm/kubepilot \
   --values values-prod.yaml
 ```
 
-### 2.4 Utiliser une base de données externe
+### 2.4 Utiliser PostgreSQL et Redis
 
-Si vous avez déjà un PostgreSQL et un Redis :
+Le chart n'embarque **pas** de sous-charts PostgreSQL/Redis : installez-les séparément (Bitnami, CloudNativePG, un service managé…) et pointez le chart dessus. Activer `externalPostgresql` bascule automatiquement `STORAGE_DRIVER` sur `postgres`, et `externalRedis` bascule `CACHE_DRIVER` sur `redis`.
 
 ```yaml
 # values-external-db.yaml
-postgresql:
-  enabled: false
-
 externalPostgresql:
   enabled: true
   host: "postgres.interne.exemple.com"
   port: 5432
   username: kubepilot
   database: kubepilot
+  sslMode: require
   existingSecret: "kubepilot-db-secret"     # secret K8s avec la clé db-password
-
-redis:
-  enabled: false
 
 externalRedis:
   enabled: true
   host: "redis.interne.exemple.com"
   port: 6379
+
+# Plus de PVC nécessaire : l'état vit dans PostgreSQL
+persistence:
+  enabled: false
 ```
 
 Créer le secret de base de données :
@@ -280,6 +268,20 @@ kubectl create secret generic kubepilot-db-secret \
   --namespace kubepilot \
   --from-literal=db-password="VotreMotDePassePostgres"
 ```
+
+> Le mot de passe est injecté via `$(DB_PASSWORD)` dans `DB_URL` : évitez les caractères réservés d'URL (`@`, `:`, `/`, `?`, `#`) ou encodez-les.
+
+### 2.4bis Droits RBAC demandés par le chart
+
+| Ressource | Verbes | Pourquoi |
+|---|---|---|
+| `namespaces`, `nodes`, `pods`, `services` | get, list, watch | Inventaire |
+| `deployments`, `daemonsets`, `statefulsets` (apps) | get, list, watch | Workloads et images |
+| `secrets` | get, list, watch | Helm 3 stocke chaque release dans un Secret — c'est la seule source des charts installés |
+| `customresourcedefinitions` | get, list | Détection des CRD présentes |
+| `nodes/proxy`, `nodes/stats`, `nodes/metrics` | get | Métriques CPU/RAM/disque via le Summary API du kubelet (agentless) |
+
+La lecture des `secrets` à l'échelle du cluster est large : si votre politique l'interdit, il n'y aura pas de findings Helm. Les métriques nœuds se désactivent avec `rbac.nodeMetrics=false` (les jauges restent alors vides).
 
 ### 2.5 Récupérer le mot de passe admin auto-généré
 
@@ -495,8 +497,12 @@ Ce token peut être réutilisé pour connecter ce même cluster depuis une autre
 
 | Variable | Défaut | Obligatoire | Description |
 |---|---|---|---|
-| `DB_URL` | — | **Oui** | URL de connexion PostgreSQL |
+| `DB_URL` | — | Si `STORAGE_DRIVER=postgres` | URL de connexion PostgreSQL |
+| `STORAGE_DRIVER` | dérivé | Non | `postgres` \| `sqlite` — SQLite si `DB_URL` vide ou `LOCAL_MODE=true` |
+| `SQLITE_PATH` | `kubepilot.db` | Non | Fichier SQLite (driver `sqlite`) |
+| `CACHE_DRIVER` | dérivé | Non | `redis` \| `memory` — mémoire dès que le stockage est SQLite |
 | `REDIS_URL` | `redis://localhost:6379` | Non | URL Redis |
+| `HELM_AUTODISCOVER` | `true` | Non | Repli sur Artifact Hub pour retrouver le dépôt d'un chart installé — `false` = résolution hors-ligne uniquement |
 | `JWT_SECRET` | `change-me-in-production` | **Oui en prod** | Clé de signature JWT (min. 32 chars) |
 | `PORT` | `8080` | Non | Port d'écoute HTTP |
 | `LOG_LEVEL` | `info` | Non | `debug` \| `info` \| `warn` \| `error` |

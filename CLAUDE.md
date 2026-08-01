@@ -81,7 +81,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ## État actuel du projet
 
-**Version courante** : `v0.2.0-alpha.1` (2026-06-12)
+**Version courante** : `v0.2.0-alpha.2` (2026-08-01)
 **Canal** : alpha
 **Branche principale** : `main`
 
@@ -146,10 +146,12 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 - [x] `go.sum` généré (`go mod tidy` — fait, v0.2.0-alpha.1)
 - [x] Vérification que le code compile sans erreurs (`go build ./...` + `go vet` OK)
-- [ ] **Accès registries effectif → findings réels** : Docker Hub (auth token anonyme à corriger — renvoie 401), CA/TLS-insecure par registre pour Harbor self-signed. **Bloquant pour l'utilité réelle** : sans ça, le watcher d'images ne produit aucun finding et l'app reste une vitrine d'inventaire (voir [[project-next-priority-findings]])
-- [ ] Gestion des registries privés dans l'UI (Harbor, ECR, GCR, ACR)
-- [ ] **Finalisation** : nettoyage en cascade des `container_images` orphelines au `DeleteWorkloadsNotSeenSince` (sinon `record not found` dans le watcher d'images ; aujourd'hui juste loggé en debug)
-- [ ] Tests unitaires backend (scoring engine, semver comparison, store)
+- [x] **Accès registries effectif → findings réels** (20 findings image + 4 findings Helm sur un cluster réel)
+- [x] Gestion des registries privés dans l'UI (Harbor, ECR, GCR, ACR) + dépôts de charts Helm
+- [x] Nettoyage en cascade des `container_images` orphelines au `DeleteWorkloadsNotSeenSince`
+- [x] Chart Helm `helm/kubepilot/` (re)créé et validé — voir `docs/installation.md` §2
+- [ ] CI de build/push des images `ghcr.io/kubepilot/{backend,frontend}` — bloque le déploiement in-cluster réel
+- [~] Tests unitaires backend : comparaison semver faite (`internal/watcher/tags_test.go`) ; reste scoring engine + store
 - [ ] Tests d'intégration frontend (Playwright)
 - [ ] Seed data pour démo / développement local
 - [ ] Page Settings (gestion utilisateurs, variables globales)
@@ -202,6 +204,15 @@ Voir `docs/scoring.md` pour la formule complète.
 - Le `*ssh.Client` vit sur le `KubernetesCollector` et est fermé dans `Stop()`.
 - Configuré en mode local par `SSH_HOST`/`SSH_USER`/`SSH_PASSWORD`/`SSH_PORT`/`SSH_KUBECONFIG_PATH`/`SSH_SUDO` ; le bootstrap enregistre alors le cluster en mode ssh.
 - Clé d'hôte non épinglée (`InsecureIgnoreHostKey`) en alpha — à durcir (known_hosts) avant prod. `ssh_password` a le tag `json:"-"`.
+
+### Origine des charts Helm (depuis Unreleased)
+- Un secret de release Helm 3 contient le nom et la version du chart mais **pas son dépôt**. `HelmRepository` (dépôts configurables + 11 publics semés au premier démarrage) sert à retrouver l'origine.
+- Un dépôt n'est retenu que si son `index.yaml` contient **exactement la version installée** — sans cette confirmation, `harbor` de Bitnami serait confondu avec celui de goharbor. Repli Artifact Hub via `HELM_AUTODISCOVER` (défaut `true`).
+- Ne **jamais** remettre `repo_url` dans les `DoUpdates` de `UpsertHelmRelease` : le collector ne connaît pas cette valeur et l'écraserait à chaque passe.
+
+### Comparaison de tags d'images (depuis Unreleased)
+- `internal/watcher/tags.go` : un tag candidat doit avoir la **même forme** que le tag courant (préfixe `v`, nombre de composants numériques, variante de build) et rester dans la **continuité des majeures** (écart ≤ `maxMajorGap`). Sans ça, les tags parasites d'un autre schéma de version dans le même dépôt gagnent toutes les comparaisons.
+- Les suffixes de pré-release (`rc`, `beta`, `dev`…) sont distingués des variantes de build (`alpine`, `oraclelinux`…) : les premiers suivent la règle semver, les secondes doivent correspondre exactement.
 
 ### MCP (Model Context Protocol)
 - Sous-commande `kubepilot mcp` = serveur MCP JSON-RPC 2.0 sur stdio (`internal/mcp`), stdlib uniquement.
