@@ -1,0 +1,164 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubepilot.backendFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubepilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  replicas: {{ .Values.replicaCount }}
+  {{- if eq (include "kubepilot.storageDriver" .) "sqlite" }}
+  # SQLite tolerates a single writer, and the in-memory cache is per-pod: the
+  # backend must not be scaled out while on this storage driver.
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "kubepilot.backendSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kubepilot.backendSelectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "kubepilot.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: backend
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8080"
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: IN_CLUSTER
+              value: {{ .Values.config.inCluster | quote }}
+            - name: CLUSTER_NAME
+              value: {{ .Values.config.clusterName | quote }}
+            - name: WORKER_INTERVAL_SECONDS
+              value: {{ .Values.config.workerIntervalSeconds | quote }}
+            - name: TLS_INSECURE
+              value: {{ .Values.config.tlsInsecure | quote }}
+            - name: HEADLAMP_URL
+              value: {{ .Values.config.headlampURL | quote }}
+            - name: NODE_METRICS_ENABLED
+              value: {{ .Values.config.nodeMetricsEnabled | quote }}
+            - name: NODE_METRICS_RETENTION_HOURS
+              value: {{ .Values.config.nodeMetricsRetentionHours | quote }}
+            - name: HELM_AUTODISCOVER
+              value: {{ .Values.config.helmAutodiscover | quote }}
+            - name: STORAGE_DRIVER
+              value: {{ include "kubepilot.storageDriver" . | quote }}
+            - name: CACHE_DRIVER
+              value: {{ include "kubepilot.cacheDriver" . | quote }}
+            {{- if eq (include "kubepilot.storageDriver" .) "sqlite" }}
+            - name: SQLITE_PATH
+              value: {{ .Values.storage.sqlite.path | quote }}
+            {{- end }}
+            {{- if .Values.externalPostgresql.enabled }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalPostgresql.existingSecret | default (include "kubepilot.secretName" .) }}
+                  key: {{ .Values.externalPostgresql.existingSecretKey }}
+            # Kubernetes expands $(DB_PASSWORD) from the variable declared above.
+            - name: DB_URL
+              value: "postgres://{{ .Values.externalPostgresql.username }}:$(DB_PASSWORD)@{{ .Values.externalPostgresql.host }}:{{ .Values.externalPostgresql.port }}/{{ .Values.externalPostgresql.database }}?sslmode={{ .Values.externalPostgresql.sslMode }}"
+            {{- end }}
+            {{- if .Values.externalRedis.enabled }}
+            - name: REDIS_URL
+              value: "redis://{{ .Values.externalRedis.host }}:{{ .Values.externalRedis.port }}"
+            {{- end }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kubepilot.secretName" . }}
+                  key: jwt-secret
+            {{- if .Values.admin.email }}
+            - name: ADMIN_EMAIL
+              value: {{ .Values.admin.email | quote }}
+            - name: ADMIN_NAME
+              value: {{ .Values.admin.name | quote }}
+            {{- end }}
+            {{- if .Values.admin.password }}
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kubepilot.secretName" . }}
+                  key: admin-password
+            {{- end }}
+            {{- with .Values.config.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if eq (include "kubepilot.storageDriver" .) "sqlite" }}
+            - name: data
+              mountPath: {{ dir .Values.storage.sqlite.path }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if eq (include "kubepilot.storageDriver" .) "sqlite" }}
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "kubepilot.pvcName" . }}
+          {{- else }}
+          # No persistence: the database is lost when the pod restarts.
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

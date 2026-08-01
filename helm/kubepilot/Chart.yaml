@@ -1,0 +1,18 @@
+apiVersion: v2
+name: kubepilot
+description: KubePilot — update and risk visibility for your Kubernetes fleet
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/kubepilot/kubepilot
+sources:
+  - https://github.com/kubepilot/kubepilot
+keywords:
+  - kubernetes
+  - updates
+  - helm
+  - security
+  - inventory
+maintainers:
+  - name: KubePilot

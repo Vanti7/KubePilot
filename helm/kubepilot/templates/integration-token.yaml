@@ -1,0 +1,15 @@
+{{- if .Values.integrationToken.create }}
+# Long-lived ServiceAccount token. Kubernetes 1.24+ no longer auto-creates one,
+# so it is requested explicitly here — another KubePilot instance can use it to
+# register this cluster as a remote one.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "kubepilot.fullname" . }}-integration-token
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubepilot.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/service-account.name: {{ include "kubepilot.serviceAccountName" . }}
+type: kubernetes.io/service-account-token
+{{- end }}
