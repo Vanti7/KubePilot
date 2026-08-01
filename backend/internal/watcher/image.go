@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Masterminds/semver/v3"
 	"github.com/google/uuid"
 	"github.com/kubepilot/backend/internal/models"
 	"github.com/kubepilot/backend/internal/store"
@@ -341,61 +340,3 @@ func (iw *ImageWatcher) cacheTags(ctx context.Context, key string, tags []string
 	_ = iw.store.Cache.Set(ctx, key, data, imageTagCacheTTL)
 }
 
-// findNewerTag compares the current tag against the available list and returns
-// the highest newer semver tag, or empty string if no update is found.
-func findNewerTag(currentTag string, availableTags []string) (string, string) {
-	currentSV, err := semver.NewVersion(currentTag)
-	if err != nil {
-		// Non-semver tag (e.g., "latest", "main") — we can't compare versions.
-		return "", models.UpdateTypeUnknown
-	}
-
-	var best *semver.Version
-	for _, t := range availableTags {
-		sv, err := semver.NewVersion(t)
-		if err != nil {
-			continue
-		}
-		// Skip pre-release tags unless the current tag is also pre-release.
-		if sv.Prerelease() != "" && currentSV.Prerelease() == "" {
-			continue
-		}
-		if sv.GreaterThan(currentSV) {
-			if best == nil || sv.GreaterThan(best) {
-				best = sv
-			}
-		}
-	}
-
-	if best == nil {
-		return "", ""
-	}
-
-	updateType := classifyUpdate(currentSV, best)
-	return best.Original(), updateType
-}
-
-// classifyUpdate determines whether the jump is a patch, minor or major update.
-func classifyUpdate(from, to *semver.Version) string {
-	if to.Major() > from.Major() {
-		return models.UpdateTypeMajor
-	}
-	if to.Minor() > from.Minor() {
-		return models.UpdateTypeMinor
-	}
-	return models.UpdateTypePatch
-}
-
-// updateTypeSeverity maps an update type to a default severity.
-func updateTypeSeverity(updateType string) string {
-	switch updateType {
-	case models.UpdateTypeMajor:
-		return models.SeverityHigh
-	case models.UpdateTypeMinor:
-		return models.SeverityMedium
-	case models.UpdateTypePatch:
-		return models.SeverityLow
-	default:
-		return models.SeverityInfo
-	}
-}
