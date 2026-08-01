@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, ChevronDown as ChevronDownIcon, SlidersHorizontal, RotateCw } from 'lucide-react'
+import { ChevronRight, ChevronDown as ChevronDownIcon, Layers, RotateCw } from 'lucide-react'
 import clsx from 'clsx'
 import { getWorkloads, getNamespaces, getFindings, scaleWorkload, restartWorkload } from '../api/client'
 import { useClusters } from '../hooks/useClusters'
@@ -229,27 +229,27 @@ export function Inventory() {
           {
             key: 'actions',
             header: 'Actions',
-            width: '90px',
+            width: '180px',
             align: 'right' as const,
             render: (w: Workload) => (
-              <div className="flex items-center justify-end gap-1">
+              <div className="flex items-center justify-end gap-1.5">
                 {w.kind !== 'DaemonSet' && (
                   <button
-                    className="p-1 rounded hover:bg-surface-elevated text-slate-400 hover:text-slate-200 disabled:opacity-40"
-                    title="Scale"
+                    className="flex items-center gap-1 px-2 py-1 rounded border border-surface-border bg-surface-elevated/60 text-slate-300 hover:border-blue-800 hover:text-blue-400 hover:bg-blue-950/40 disabled:opacity-40 disabled:pointer-events-none text-xs font-medium transition-colors"
                     disabled={busyId === w.id}
                     onClick={(e) => { e.stopPropagation(); handleScale(w) }}
                   >
-                    <SlidersHorizontal size={13} className={busyId === w.id ? 'animate-pulse' : ''} />
+                    <Layers size={12} className={busyId === w.id ? 'animate-pulse' : ''} />
+                    Scale
                   </button>
                 )}
                 <button
-                  className="p-1 rounded hover:bg-surface-elevated text-slate-400 hover:text-slate-200 disabled:opacity-40"
-                  title="Restart"
+                  className="flex items-center gap-1 px-2 py-1 rounded border border-surface-border bg-surface-elevated/60 text-slate-300 hover:border-orange-800 hover:text-orange-400 hover:bg-orange-950/40 disabled:opacity-40 disabled:pointer-events-none text-xs font-medium transition-colors"
                   disabled={busyId === w.id}
                   onClick={(e) => { e.stopPropagation(); handleRestart(w) }}
                 >
-                  <RotateCw size={13} className={busyId === w.id ? 'animate-spin' : ''} />
+                  <RotateCw size={12} className={busyId === w.id ? 'animate-spin' : ''} />
+                  Restart
                 </button>
               </div>
             ),
