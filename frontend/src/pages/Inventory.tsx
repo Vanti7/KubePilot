@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, ChevronDown as ChevronDownIcon } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronRight, ChevronDown as ChevronDownIcon, SlidersHorizontal, RotateCw } from 'lucide-react'
 import clsx from 'clsx'
-import { getWorkloads, getNamespaces, getFindings } from '../api/client'
+import { getWorkloads, getNamespaces, getFindings, scaleWorkload, restartWorkload } from '../api/client'
 import { useClusters } from '../hooks/useClusters'
+import { useAuth } from '../contexts/AuthContext'
 import { DataTable, Column } from '../components/DataTable'
 import { SlideOver } from '../components/SlideOver'
 import type { Workload, Namespace } from '../types'
@@ -103,11 +104,47 @@ interface TreeNode {
 }
 
 export function Inventory() {
+  const qc = useQueryClient()
+  const { user } = useAuth()
+  const canWrite = user?.role === 'admin' || user?.role === 'operator'
   const { data: clusters = [] } = useClusters()
   const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set())
   const [selectedNamespaceId, setSelectedNamespaceId] = useState<string | null>(null)
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null)
   const [activeWorkload, setActiveWorkload] = useState<Workload | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  async function handleScale(w: Workload) {
+    const input = window.prompt(`New replica count for ${w.name}`, String(w.replicas_desired))
+    if (input === null) return
+    const replicas = Number(input)
+    if (!Number.isInteger(replicas) || replicas < 0) {
+      alert('Replica count must be a whole number >= 0')
+      return
+    }
+    setBusyId(w.id)
+    try {
+      await scaleWorkload(w.id, replicas)
+      await qc.invalidateQueries({ queryKey: ['workloads'] })
+    } catch (e: any) {
+      alert(e?.response?.data?.error || e.message)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function handleRestart(w: Workload) {
+    if (!confirm(`Restart ${w.name}? This triggers a rolling restart of all its pods.`)) return
+    setBusyId(w.id)
+    try {
+      await restartWorkload(w.id)
+      await qc.invalidateQueries({ queryKey: ['workloads'] })
+    } catch (e: any) {
+      alert(e?.response?.data?.error || e.message)
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   const { data: namespaces = [] } = useQuery({
     queryKey: ['namespaces'],
@@ -187,6 +224,38 @@ export function Inventory() {
       width: '80px',
       render: (w) => <span className="text-xs text-slate-500">{formatAge(w.last_observed_at)}</span>,
     },
+    ...(canWrite
+      ? [
+          {
+            key: 'actions',
+            header: 'Actions',
+            width: '90px',
+            align: 'right' as const,
+            render: (w: Workload) => (
+              <div className="flex items-center justify-end gap-1">
+                {w.kind !== 'DaemonSet' && (
+                  <button
+                    className="p-1 rounded hover:bg-surface-elevated text-slate-400 hover:text-slate-200 disabled:opacity-40"
+                    title="Scale"
+                    disabled={busyId === w.id}
+                    onClick={(e) => { e.stopPropagation(); handleScale(w) }}
+                  >
+                    <SlidersHorizontal size={13} className={busyId === w.id ? 'animate-pulse' : ''} />
+                  </button>
+                )}
+                <button
+                  className="p-1 rounded hover:bg-surface-elevated text-slate-400 hover:text-slate-200 disabled:opacity-40"
+                  title="Restart"
+                  disabled={busyId === w.id}
+                  onClick={(e) => { e.stopPropagation(); handleRestart(w) }}
+                >
+                  <RotateCw size={13} className={busyId === w.id ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            ),
+          },
+        ]
+      : []),
   ]
 
   return (

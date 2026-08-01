@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubepilot/backend/internal/store"
 	"go.uber.org/zap"
+	"k8s.io/client-go/kubernetes"
 )
 
 // MetricsConfig controls node-metrics collection behaviour, shared by every
@@ -104,6 +105,20 @@ func (m *CollectorManager) TriggerSync(clusterID string) bool {
 		kc.Collect(ctx)
 	}()
 	return true
+}
+
+// GetClientset returns the live Kubernetes client for a cluster with an
+// active collector — the same long-lived clientset (and, for ssh-mode
+// clusters, the same already-open tunnel) the collector itself watches with.
+// Returns false if no collector is currently running for that cluster.
+func (m *CollectorManager) GetClientset(clusterID string) (kubernetes.Interface, bool) {
+	m.mu.Lock()
+	kc, ok := m.collectors[clusterID]
+	m.mu.Unlock()
+	if !ok {
+		return nil, false
+	}
+	return kc.clientset, true
 }
 
 // RunCron periodically calls SyncClusters and blocks until ctx is cancelled or Stop is called.

@@ -84,6 +84,8 @@ const (
 	ActionLogResolve       = "resolve"
 	ActionLogIgnore        = "ignore"
 	ActionLogSync          = "sync"
+	ActionLogScale         = "scale"
+	ActionLogRestart       = "restart"
 )
 
 // Action log outcome

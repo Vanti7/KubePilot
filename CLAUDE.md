@@ -81,7 +81,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ## État actuel du projet
 
-**Version courante** : `v0.2.0-alpha.3` (2026-08-02)
+**Version courante** : `v0.2.0-alpha.4` (2026-08-02)
 **Canal** : alpha
 **Branche principale** : `main`
 
@@ -95,7 +95,8 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 - [x] Store — CRUD clusters, findings, workloads, helm releases, nodes (`internal/store`)
 - [x] API REST Gin — 15 groupes d'endpoints + SSE (`internal/api`)
 - [x] Middleware JWT auth + RBAC par rôle (`internal/api/middleware`)
-- [x] Piste d'audit `action_logs` interrogeable (`GET /api/v1/action-logs`) + helper `handlers.RecordAction` — fondations pour les futurs endpoints d'écriture (deploy/scale/helm-upgrade), aucun n'existe encore
+- [x] Piste d'audit `action_logs` interrogeable (`GET /api/v1/action-logs`) + helper `handlers.RecordAction`
+- [x] **Scale / rolling-restart** (`PATCH /api/v1/workloads/:id/scale`, `POST /api/v1/workloads/:id/restart`) — première action d'écriture sur un cluster, package `internal/k8sops`, RBAC in-cluster mis à jour (`kubepilot-gitops`)
 - [x] Bootstrap first-run — seed environments, création admin, auto-enregistrement cluster local (`internal/bootstrap`)
 - [x] K8s Collector — Watch API Deployments/DaemonSets/StatefulSets/Nodes/Namespaces + décodage secrets Helm (`internal/collector`)
 - [x] Image Watcher — polling OCI registry, semver comparison, cache Redis (`internal/watcher/image.go`)
@@ -218,6 +219,13 @@ Voir `docs/scoring.md` pour la formule complète.
 ### Comparaison de tags d'images (depuis Unreleased)
 - `internal/watcher/tags.go` : un tag candidat doit avoir la **même forme** que le tag courant (préfixe `v`, nombre de composants numériques, variante de build) et rester dans la **continuité des majeures** (écart ≤ `maxMajorGap`). Sans ça, les tags parasites d'un autre schéma de version dans le même dépôt gagnent toutes les comparaisons.
 - Les suffixes de pré-release (`rc`, `beta`, `dev`…) sont distingués des variantes de build (`alpine`, `oraclelinux`…) : les premiers suivent la règle semver, les secondes doivent correspondre exactement.
+
+### Écriture sur un cluster — action_logs, RBAC, k8sops (depuis Unreleased)
+- **`CollectorManager.GetClientset(clusterID)`** (`collector/manager.go`) est le seul point d'entrée pour obtenir un client K8s en dehors de la boucle de collecte — il réutilise le clientset déjà vivant du `KubernetesCollector` (même tunnel SSH auto-réparant pour les clusters en mode ssh), plutôt que d'ouvrir une connexion dédiée par écriture. Renvoie `(nil, false)` si aucun collector n'est actif pour ce cluster — le handler appelant doit alors répondre une erreur claire, jamais échouer en silence.
+- **`internal/k8sops`** contient la logique K8s pure des actions d'écriture (aujourd'hui : `ScaleWorkload`, `RestartWorkload`), séparée du handler et du package `collector` (lecture seule). Prend un `kubernetes.Interface`, testable avec `k8s.io/client-go/kubernetes/fake` sans cluster réel.
+- **`handlers.RecordAction`** (`api/handlers/action_logs.go`) : chaque endpoint d'écriture l'appelle une fois après sa mutation, avec `models.ActionLogStatusSuccess`/`Failure`. Le rôle reste `middleware.RequireRole` au routeur — pas de nouvelle mécanique RBAC, pas de wrapper/décorateur (ce codebase n'en a aucun, les handlers appellent leurs helpers explicitement).
+- Après un `Patch` sur un Deployment/StatefulSet/DaemonSet, **ne jamais mettre à jour `models.Workload` à la main** : l'événement Watch déclenché est déjà capté et upsert par le collector existant — dupliquer cette logique créerait un risque de race.
+- **RBAC in-cluster** (`kubepilot-gitops`) : `update`/`patch` sur `deployments`/`daemonsets`/`statefulsets` uniquement (pas `replicasets`, jamais touché directement). Le rôle `-integration` (token pour une instance distante) reste volontairement lecture seule.
 
 ### MCP (Model Context Protocol)
 - Sous-commande `kubepilot mcp` = serveur MCP JSON-RPC 2.0 sur stdio (`internal/mcp`), stdlib uniquement.

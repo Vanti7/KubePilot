@@ -18,7 +18,8 @@
 
 ## ✅ Fait récemment
 
-- [~] **Fondations audit trail** (2026-08-02) — `action_logs` interrogeable (`GET /api/v1/action-logs`, paginé/filtrable) + helper `handlers.RecordAction` (rôle via `middleware.RequireRole`, inchangé) ; pas encore branché sur un endpoint d'écriture réel (aucun n'existe). Premier test du package `store` (`action_logs_test.go`)
+- [x] **Scale / rolling-restart** (2026-08-02) — première action d'écriture réelle de KubePilot sur un cluster : `PATCH /api/v1/workloads/:id/scale` + `POST /api/v1/workloads/:id/restart`, réutilisent le clientset déjà vivant du collector (`CollectorManager.GetClientset`), logique isolée et testée dans `internal/k8sops`. Boutons UI sur Inventory. RBAC `update`/`patch` poussé sur `gitops/dev`. Validé de bout en bout sur Lab Cyllene (deployment jetable, nettoyé après coup) : scale 1→3 confirmé par `kubectl`, restart confirmé par l'annotation `restartedAt`, le collector remet `replicas_desired` à jour tout seul, `action_logs` enregistre les deux
+- [x] **Fondations audit trail** (2026-08-02) — `action_logs` interrogeable (`GET /api/v1/action-logs`, paginé/filtrable) + helper `handlers.RecordAction` (rôle via `middleware.RequireRole`, inchangé). Premier test du package `store` (`action_logs_test.go`)
 - [x] **Métriques nœuds réparées en in-cluster** (2026-08-01) — le chart (dépôt `kubepilot-gitops`) n'accordait pas `nodes/proxy` : toutes les jauges restaient vides sans erreur. Corrigé et poussé sur `gitops/dev`
 - [x] **Findings Helm réels** (2026-08-01) — le watcher ne produisait rien : un secret de release Helm n'enregistre **pas** son dépôt d'origine, donc `repo_url` restait vide. Résolution par confirmation de version (dépôts configurables + 11 publics semés + repli Artifact Hub) → 4 findings réels sur Lab Cyllene
 - [x] **Faux positifs semver** (2026-08-01) — forme du tag + continuité des majeures, avec tests unitaires (`internal/watcher/tags_test.go`) : `mysql 8.0 → 9.7` (au lieu de `26.7`), `goharbor/redis-photon v2.14.3 → v2.15.1` (au lieu de `4.0`)
@@ -61,8 +62,8 @@ Le rollout déclenché par notre push RBAC est resté bloqué sur deux problème
 ### 3. Ensuite — Pilotage MVP *(cœur de la vision, via l'API server)*
 - [ ] Deploy d'un manifest (server-side apply)
 - [ ] Édition `values.yaml` Helm + upgrade/rollback (Helm SDK Go)
-- [ ] Scale / rolling-restart / edit ressource
-- [~] Journalisation des actions (`action_logs`) + garde-fous (rôles) — fondations posées : table interrogeable (`GET /api/v1/action-logs`) + helper `handlers.RecordAction` ; reste à brancher sur deploy/scale/helm-upgrade une fois ces endpoints construits
+- [x] Scale / rolling-restart — `edit ressource` (générique) reste à faire
+- [x] Journalisation des actions (`action_logs`) + garde-fous (rôles) — brancher sur scale/restart, reste deploy/helm-upgrade
 
 ### 4. Plus tard — Agent hôte *(ancre in-cluster)*
 - [ ] Inventaire OS/packages des nœuds (DaemonSet)
@@ -70,7 +71,7 @@ Le rollout déclenché par notre push RBAC est resté bloqué sur deux problème
 - [ ] Actions hôte (patch OS, reboot, drain) — séparable, V2/V3
 
 ### En continu
-- [~] Tests backend — `internal/watcher/tags_test.go` (comparaison semver) + `internal/store/action_logs_test.go` (premier test du package `store`) faits ; **reste** scoring engine + le reste du store
+- [~] Tests backend — `internal/watcher/tags_test.go` (semver), `internal/store/action_logs_test.go`, `internal/k8sops/workloads_test.go` (clientset factice) faits ; **reste** scoring engine + le reste du store
 - [x] Page Settings (utilisateurs, infos système)
 - [ ] Page History (audit log)
 - [x] UI registries privés (Harbor, ECR, GCR, ACR) + dépôts de charts Helm
@@ -102,5 +103,5 @@ cd frontend; $env:VITE_PROXY_TARGET="http://localhost:8090"; npm run dev -- --po
 ## 📌 Rappels process
 
 - **Changelog obligatoire** : toute modif notable → section `[Unreleased]` du `CHANGELOG.md`.
-- **Versioning** : SemVer + cycle alpha/beta/rc/stable (cf. CLAUDE.md). Version courante : `v0.2.0-alpha.3`.
+- **Versioning** : SemVer + cycle alpha/beta/rc/stable (cf. CLAUDE.md). Version courante : `v0.2.0-alpha.4`.
 - **Commits** : Conventional Commits (`type(scope): message`).

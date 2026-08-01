@@ -182,6 +182,15 @@ export async function getWorkload(id: string): Promise<Workload> {
   return data
 }
 
+export async function scaleWorkload(id: string, replicas: number): Promise<{ id: string; replicas: number }> {
+  const { data } = await api.patch<{ id: string; replicas: number }>(`/workloads/${id}/scale`, { replicas })
+  return data
+}
+
+export async function restartWorkload(id: string): Promise<void> {
+  await api.post(`/workloads/${id}/restart`)
+}
+
 // Helm releases
 export async function getHelmReleases(filter?: HelmFilter): Promise<PaginatedResponse<HelmRelease>> {
   const { data } = await api.get<PaginatedResponse<HelmRelease>>('/helm', { params: filter })

@@ -15,7 +15,7 @@ func NewRouter(
 	cfg *config.Config,
 	s *store.Store,
 	bus *handlers.EventBus,
-	syncer handlers.ClusterSyncer,
+	syncer handlers.ClusterOps,
 	version string,
 	logger *zap.Logger,
 ) *gin.Engine {
@@ -96,11 +96,13 @@ func NewRouter(
 	}
 
 	// Workloads.
-	workloadH := handlers.NewWorkloadHandler(s, logger)
+	workloadH := handlers.NewWorkloadHandler(s, syncer, logger)
 	workloads := v1.Group("/workloads")
 	{
 		workloads.GET("", workloadH.ListWorkloads)
 		workloads.GET("/:id", workloadH.GetWorkload)
+		workloads.PATCH("/:id/scale", middleware.RequireRole("operator"), workloadH.ScaleWorkload)
+		workloads.POST("/:id/restart", middleware.RequireRole("operator"), workloadH.RestartWorkload)
 	}
 
 	// Helm releases.

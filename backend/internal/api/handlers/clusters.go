@@ -21,6 +21,16 @@ type ClusterSyncer interface {
 	TriggerSync(clusterID string) bool
 }
 
+// ClusterOps is everything NewRouter needs from *collector.CollectorManager:
+// triggering a sync (ClusterSyncer) and handing out a live client for
+// in-request writes (ClientsetProvider, defined in workloads.go). One
+// interface so a single value satisfies both without the api package ever
+// importing the collector package.
+type ClusterOps interface {
+	ClusterSyncer
+	ClientsetProvider
+}
+
 // ClusterHandler handles cluster CRUD endpoints.
 type ClusterHandler struct {
 	store  *store.Store
