@@ -3,7 +3,7 @@
 Ce document couvre trois scénarios d'installation :
 
 1. [Développement local](#1-développement-local) — docker-compose, idéal pour tester et contribuer
-2. [Déploiement in-cluster via Helm](#2-déploiement-in-cluster-via-helm) — installation dans un cluster Kubernetes existant
+2. [Déploiement in-cluster (GitOps)](#2-déploiement-in-cluster-gitops) — Jenkins → Harbor → ArgoCD, chart hébergé dans `kubepilot-gitops`
 3. [Connexion de clusters supplémentaires](#3-connexion-de-clusters-supplémentaires) — intégrer d'autres clusters au cockpit
 
 ---
@@ -156,183 +156,76 @@ curl -X POST http://localhost:8080/api/v1/clusters \
 
 ---
 
-## 2. Déploiement in-cluster via Helm
+## 2. Déploiement in-cluster (GitOps)
 
-### 2.1 Prérequis
+> Le chart Helm **ne vit pas dans ce dépôt**. Il a été déplacé dans le dépôt GitOps
+> [`kubepilot-gitops`](http://gitea.10.0.60.107.nip.io/vanti/kubepilot-gitops) (`charts/kubepilot/`),
+> qui porte aussi les valeurs par environnement et les Applications ArgoCD.
+> Une seule source de vérité : ne pas recréer de chart ici.
 
-- Un cluster Kubernetes opérationnel (1.25+)
-- `kubectl` configuré et pointant vers le cluster cible
-- `helm` v3.12+
-- Accès en écriture au namespace cible (ou droits cluster-admin pour créer le namespace)
-
-### 2.2 Installation minimale
-
-Par défaut le chart n'a **aucune dépendance externe** : les données vont dans SQLite sur un PersistentVolume et le cache est en mémoire.
-
-```bash
-helm install kubepilot ./helm/kubepilot \
-  --namespace kubepilot \
-  --create-namespace \
-  --set admin.email="vous@domaine.com" \
-  --set admin.password="VotreMotDePasse"
-```
-
-> **Note** : si `admin.email` est omis, aucun compte n'est pré-créé — l'écran de setup first-run s'affiche à la première ouverture de l'UI. Si seul `admin.password` est omis, un mot de passe est auto-généré et écrit dans les logs (voir section 2.5).
->
-> `secret.jwtSecret` est **généré à l'install** et conservé entre les `helm upgrade` (annotation `helm.sh/resource-policy: keep` sur le Secret). Le fixer explicitement n'est nécessaire que pour partager la clé entre plusieurs instances.
-
-Après l'installation, Helm affiche les instructions de connexion :
+### 2.1 Chaîne de déploiement
 
 ```
-kubectl port-forward -n kubepilot svc/kubepilot-frontend 3000:80
+push sur dev/staging  ─▶  Jenkins  ─▶  build backend + frontend (parallèle)
+                                    ─▶  push Harbor  harbor.<domaine>/kubepilot/{backend,frontend}:<tag>
+                                    ─▶  sed du tag dans kubepilot-gitops  envs/<env>/values.yaml
+                                                                    │
+                                                          ArgoCD ◀──┘  sync  ─▶  cluster
 ```
 
-> ⚠️ Avec `storage.driver: sqlite`, le backend ne doit **pas** être scalé (`replicaCount: 1`) : SQLite n'accepte qu'un seul writer et le cache mémoire est par pod. La stratégie de déploiement est forcée à `Recreate`. Pour plusieurs réplicas, passer à PostgreSQL + Redis (section 2.4).
+| Branche source | Tag d'image | Values GitOps | Branche GitOps |
+|---|---|---|---|
+| `dev` | `v<VERSION>-alpha.<BUILD>` | `envs/dev/values.yaml` | `dev` |
+| `staging` | `v<VERSION>-beta.<BUILD>` | `envs/staging/values.yaml` | `staging` |
 
-### 2.3 Installation avec Ingress
+`VERSION` (à la racine de ce dépôt) fournit le `MAJOR.MINOR.PATCH` ; Jenkins y accole le
+numéro de build. Le pipeline est défini dans `kubepilot-gitops/ci/Jenkinsfile`.
 
-Créer un fichier `values-prod.yaml` :
+### 2.2 Déployer une nouvelle version
 
-```yaml
-admin:
-  email: "admin@votre-domaine.com"
-  password: "VotreMotDePasseSecurise"
-  name: "Administrateur"
+Rien à faire manuellement : pousser sur `dev` suffit. Pour forcer un déploiement sans
+nouveau build, modifier le tag dans `envs/<env>/values.yaml` du dépôt GitOps — ArgoCD
+synchronise.
 
-config:
-  logLevel: "info"
-  inCluster: true
-  clusterName: "prod-principal"
-  headlampURL: "https://headlamp.votre-domaine.com"
+### 2.3 Adapter la configuration
 
-persistence:
-  enabled: true
-  size: 5Gi
-  storageClass: "longhorn"    # adapter à votre cluster
+Les réglages spécifiques à un environnement vont dans `envs/<env>/values.yaml`
+(`config.*`, `ingress.*`, `resources.*`, `imagePullSecrets`…). Les réglages structurels
+vont dans `charts/kubepilot/values.yaml`.
 
-ingress:
-  enabled: true
-  className: "nginx"          # adapter à votre ingress controller
-  annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    # SSE : lecture longue et pas de buffering, sinon le flux temps réel est coupé
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-buffering: "off"
-  hosts:
-    - host: kubepilot.votre-domaine.com
-      paths:
-        - path: /
-          pathType: Prefix
-  tls:
-    - secretName: kubepilot-tls
-      hosts:
-        - kubepilot.votre-domaine.com
-```
-
-```bash
-helm install kubepilot ./helm/kubepilot \
-  --namespace kubepilot \
-  --create-namespace \
-  --values values-prod.yaml
-```
-
-### 2.4 Utiliser PostgreSQL et Redis
-
-Le chart n'embarque **pas** de sous-charts PostgreSQL/Redis : installez-les séparément (Bitnami, CloudNativePG, un service managé…) et pointez le chart dessus. Activer `externalPostgresql` bascule automatiquement `STORAGE_DRIVER` sur `postgres`, et `externalRedis` bascule `CACHE_DRIVER` sur `redis`.
-
-```yaml
-# values-external-db.yaml
-externalPostgresql:
-  enabled: true
-  host: "postgres.interne.exemple.com"
-  port: 5432
-  username: kubepilot
-  database: kubepilot
-  sslMode: require
-  existingSecret: "kubepilot-db-secret"     # secret K8s avec la clé db-password
-
-externalRedis:
-  enabled: true
-  host: "redis.interne.exemple.com"
-  port: 6379
-
-# Plus de PVC nécessaire : l'état vit dans PostgreSQL
-persistence:
-  enabled: false
-```
-
-Créer le secret de base de données :
-
-```bash
-kubectl create secret generic kubepilot-db-secret \
-  --namespace kubepilot \
-  --from-literal=db-password="VotreMotDePassePostgres"
-```
-
-> Le mot de passe est injecté via `$(DB_PASSWORD)` dans `DB_URL` : évitez les caractères réservés d'URL (`@`, `:`, `/`, `?`, `#`) ou encodez-les.
-
-### 2.4bis Droits RBAC demandés par le chart
+### 2.4 Droits RBAC accordés par le chart
 
 | Ressource | Verbes | Pourquoi |
 |---|---|---|
-| `namespaces`, `nodes`, `pods`, `services` | get, list, watch | Inventaire |
-| `deployments`, `daemonsets`, `statefulsets` (apps) | get, list, watch | Workloads et images |
-| `secrets` | get, list, watch | Helm 3 stocke chaque release dans un Secret — c'est la seule source des charts installés |
-| `customresourcedefinitions` | get, list | Détection des CRD présentes |
+| `namespaces`, `nodes`, `pods`, `services`, `secrets`, `configmaps` | get, list, watch | Inventaire. Les `secrets` sont indispensables : Helm 3 y stocke chaque release, c'est la seule source des charts installés |
+| `deployments`, `daemonsets`, `statefulsets`, `replicasets` (apps) | get, list, watch | Workloads et images |
+| `cronjobs`, `jobs` (batch), `ingresses` (networking) | get, list, watch | Inventaire |
 | `nodes/proxy`, `nodes/stats`, `nodes/metrics` | get | Métriques CPU/RAM/disque via le Summary API du kubelet (agentless) |
 
-La lecture des `secrets` à l'échelle du cluster est large : si votre politique l'interdit, il n'y aura pas de findings Helm. Les métriques nœuds se désactivent avec `rbac.nodeMetrics=false` (les jauges restent alors vides).
+⚠️ `nodes/proxy` est **obligatoire pour les métriques nœuds** : le collector lit
+`/api/v1/nodes/<name>/proxy/stats/summary`, il n'utilise **pas** l'API `metrics.k8s.io`.
+Sans ce droit les jauges restent vides sans erreur visible. Désactivable via
+`rbac.nodeMetrics=false` si la politique du cluster l'interdit.
 
 ### 2.5 Récupérer le mot de passe admin auto-généré
 
-Si `admin.password` n'a pas été défini lors de l'installation :
+Si `admin.password` est vide dans les values de l'environnement :
 
 ```bash
-kubectl logs -n kubepilot deploy/kubepilot-backend \
-  | grep -A 5 "First-Run Setup"
+kubectl logs -n kubepilot-dev deploy/kubepilot-backend | grep -A 5 "First-Run Setup"
 ```
 
-### 2.6 Accéder à l'UI en port-forward
+### 2.6 Vérifier l'état du déploiement
 
 ```bash
-kubectl port-forward -n kubepilot svc/kubepilot-frontend 3000:80
-# Ouvrir : http://localhost:3000
+kubectl get pods -n kubepilot-dev
+kubectl logs -n kubepilot-dev deploy/kubepilot-backend --tail=50
+kubectl exec -n kubepilot-dev deploy/kubepilot-backend -- wget -qO- http://localhost:8080/health/ready
 ```
 
-### 2.7 Vérifier l'état de l'installation
+Côté ArgoCD, l'état de synchronisation se lit sur l'Application définie dans
+`kubepilot-gitops/argocd/app-<env>.yaml`.
 
-```bash
-# Pods en cours d'exécution
-kubectl get pods -n kubepilot
-
-# Logs backend
-kubectl logs -n kubepilot deploy/kubepilot-backend --tail=50
-
-# Health check
-kubectl exec -n kubepilot deploy/kubepilot-backend -- \
-  wget -qO- http://localhost:8080/health/ready
-```
-
-### 2.8 Mettre à jour
-
-```bash
-helm upgrade kubepilot ./helm/kubepilot \
-  --namespace kubepilot \
-  --values values-prod.yaml \
-  --set image.tag="0.2.0" \
-  --set frontend.image.tag="0.2.0"
-```
-
-### 2.9 Désinstaller
-
-```bash
-helm uninstall kubepilot --namespace kubepilot
-# Supprimer les données persistantes (optionnel)
-kubectl delete pvc -n kubepilot --all
-kubectl delete namespace kubepilot
-```
-
----
 
 ## 3. Connexion de clusters supplémentaires
 

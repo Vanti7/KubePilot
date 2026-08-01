@@ -100,17 +100,14 @@ make dev-frontend
 Au premier démarrage, un compte `admin@kubepilot.local` est créé automatiquement.  
 Si `ADMIN_PASSWORD` n'est pas défini, le mot de passe est généré et affiché dans les logs du backend.
 
-### Déploiement Kubernetes (Helm)
+### Déploiement Kubernetes (GitOps)
 
-```bash
-helm install kubepilot ./helm/kubepilot \
-  --namespace kubepilot --create-namespace \
-  --set secret.jwtSecret="$(openssl rand -hex 32)" \
-  --set admin.email="vous@domaine.com" \
-  --set admin.password="VotreMotDePasse"
-```
+Le chart Helm vit dans le dépôt **`kubepilot-gitops`** (`charts/kubepilot/`), avec les valeurs
+par environnement et les Applications ArgoCD. Un push sur `dev` déclenche Jenkins, qui build et
+pousse les images sur Harbor puis met à jour le tag dans `envs/dev/values.yaml` — ArgoCD
+synchronise. Il n'y a **rien à installer à la main**.
 
-Voir [docs/installation.md](docs/installation.md) pour la procédure complète.
+Voir [docs/installation.md](docs/installation.md) pour la chaîne complète.
 
 ---
 
@@ -151,7 +148,6 @@ KubePilot/
 │       ├── hooks/            useFindings, useClusters, useSSE
 │       ├── pages/            Overview, Updates, Inventory, Helm, Nodes…
 │       └── types/            Types TypeScript des domaines
-├── helm/kubepilot/           Helm chart de déploiement in-cluster
 ├── docs/                     Documentation
 ├── docker-compose.yml        Stack locale (PG + Redis + backend + frontend)
 └── Makefile                  Commandes de développement

@@ -126,7 +126,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 #### Infrastructure
 - [x] `docker-compose.yml` — PostgreSQL 15 + Redis 7 + backend + frontend
-- [x] Helm chart (`helm/kubepilot/`) — deployment, service, SA, RBAC, ClusterRole, secret, ingress, integration-token, NOTES.txt
+- [x] Helm chart — **hébergé dans le dépôt `kubepilot-gitops`** (`charts/kubepilot/`), pas ici (voir « Déploiement » plus bas)
 - [x] `Makefile` — dev-infra, dev-backend, dev-frontend, test, lint, build, clean
 - [x] `.gitignore`
 
@@ -149,8 +149,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 - [x] **Accès registries effectif → findings réels** (20 findings image + 4 findings Helm sur un cluster réel)
 - [x] Gestion des registries privés dans l'UI (Harbor, ECR, GCR, ACR) + dépôts de charts Helm
 - [x] Nettoyage en cascade des `container_images` orphelines au `DeleteWorkloadsNotSeenSince`
-- [x] Chart Helm `helm/kubepilot/` (re)créé et validé — voir `docs/installation.md` §2
-- [ ] CI de build/push des images `ghcr.io/kubepilot/{backend,frontend}` — bloque le déploiement in-cluster réel
+- [x] Déploiement in-cluster opérationnel : Jenkins → Harbor → ArgoCD (voir `docs/installation.md` §2)
 - [~] Tests unitaires backend : comparaison semver faite (`internal/watcher/tags_test.go`) ; reste scoring engine + store
 - [ ] Tests d'intégration frontend (Playwright)
 - [ ] Seed data pour démo / développement local
@@ -204,6 +203,11 @@ Voir `docs/scoring.md` pour la formule complète.
 - Le `*ssh.Client` vit sur le `KubernetesCollector` et est fermé dans `Stop()`.
 - Configuré en mode local par `SSH_HOST`/`SSH_USER`/`SSH_PASSWORD`/`SSH_PORT`/`SSH_KUBECONFIG_PATH`/`SSH_SUDO` ; le bootstrap enregistre alors le cluster en mode ssh.
 - Clé d'hôte non épinglée (`InsecureIgnoreHostKey`) en alpha — à durcir (known_hosts) avant prod. `ssh_password` a le tag `json:"-"`.
+
+### Déploiement — dépôt GitOps séparé
+- **Le chart Helm ne vit PAS dans ce dépôt.** Il a été déplacé dans `kubepilot-gitops` (`charts/kubepilot/`) en mai 2026 (commit `070b901`), avec `envs/<env>/values.yaml` et les Applications ArgoCD. Le Jenkinsfile y est aussi (`ci/Jenkinsfile`, déplacé par `95a0ce0`). **Ne jamais recréer de `helm/` ici** — deux charts divergeraient.
+- Chaîne : push `dev`/`staging` → Jenkins build back+front en parallèle → push Harbor `harbor.<domaine>/kubepilot/{backend,frontend}:v<VERSION>-alpha|beta.<BUILD>` → `sed` du tag dans le dépôt GitOps → ArgoCD sync. Le fichier `VERSION` à la racine fournit le `MAJOR.MINOR.PATCH`.
+- **`nodes/proxy` est obligatoire** pour les métriques nœuds : le collector lit le Summary API du kubelet via le proxy de l'API server, **pas** `metrics.k8s.io`. Sans ce droit les jauges restent vides sans erreur.
 
 ### Origine des charts Helm (depuis Unreleased)
 - Un secret de release Helm 3 contient le nom et la version du chart mais **pas son dépôt**. `HelmRepository` (dépôts configurables + 11 publics semés au premier démarrage) sert à retrouver l'origine.

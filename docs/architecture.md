@@ -316,7 +316,10 @@ TanStack Query on the frontend listens to SSE events and calls `queryClient.inva
 
 ## 7. Deployment Model
 
-KubePilot is deployed in-cluster via a Helm chart located at `helm/kubepilot/`.
+KubePilot is deployed in-cluster via a Helm chart hosted in the separate `kubepilot-gitops`
+repository (`charts/kubepilot/`), applied by ArgoCD. Jenkins builds the images on push,
+pushes them to Harbor and bumps the tag in `envs/<env>/values.yaml`. See
+[installation.md](installation.md) §2.
 
 ### Namespace
 

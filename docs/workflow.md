@@ -18,7 +18,7 @@
 
 ## ✅ Fait récemment
 
-- [x] **Chart Helm `helm/kubepilot/`** (2026-08-01) — (re)créé et validé (`helm lint`, `helm template`, `kubectl --dry-run=client`). SQLite+PVC par défaut (zéro dépendance), PostgreSQL/Redis via `externalPostgresql`/`externalRedis`, RBAC `nodes/proxy` pour les métriques
+- [x] **Métriques nœuds réparées en in-cluster** (2026-08-01) — le chart (dépôt `kubepilot-gitops`) n'accordait pas `nodes/proxy` : toutes les jauges restaient vides sans erreur. Corrigé et poussé sur `gitops/dev`
 - [x] **Findings Helm réels** (2026-08-01) — le watcher ne produisait rien : un secret de release Helm n'enregistre **pas** son dépôt d'origine, donc `repo_url` restait vide. Résolution par confirmation de version (dépôts configurables + 11 publics semés + repli Artifact Hub) → 4 findings réels sur Lab Cyllene
 - [x] **Faux positifs semver** (2026-08-01) — forme du tag + continuité des majeures, avec tests unitaires (`internal/watcher/tags_test.go`) : `mysql 8.0 → 9.7` (au lieu de `26.7`), `goharbor/redis-photon v2.14.3 → v2.15.1` (au lieu de `4.0`)
 - [x] **Findings d'image réels** (2026-08-01) — 5 bugs cumulés corrigés, validés contre le cluster Lab Cyllene : 20 findings réels remontés (Traefik, CoreDNS, kube-proxy, metrics-server, Harbor…). Voir `CHANGELOG.md` pour le détail
@@ -41,11 +41,14 @@
 - [x] Faux positifs semver corrigés (forme du tag + continuité des majeures) + tests unitaires
 - [x] Findings **Helm** réels validés : 4 sur Lab Cyllene (argo-cd, traefik, headlamp, metrics-server ; harbor déjà à jour)
 
-### 2. ~~Prérequis tiering — Chart Helm~~ ✅ *(fait le 2026-08-01)*
-- [x] Chart `helm/kubepilot/` créé : deployment backend+frontend, services, SA, RBAC/ClusterRole, secret, PVC, ingress, token d'intégration, NOTES
-- [x] RBAC : `get nodes/proxy` (+ `nodes/stats`, `nodes/metrics`) pour les métriques en in-cluster
-- [x] Validé `helm lint` + `helm template` (défaut SQLite, et PostgreSQL/Redis/Ingress) + `kubectl apply --dry-run=client`
-- [ ] **Reste** : déploiement in-cluster réel sur un cluster (images `ghcr.io/kubepilot/*` à publier d'abord — aucun pipeline de build/push n'existe encore)
+### 2. ~~Prérequis tiering — Chart Helm~~ ✅
+> ⚠️ Le chart vit dans le dépôt **`kubepilot-gitops`** (`charts/kubepilot/`), pas ici — déplacé
+> volontairement en mai 2026 (`070b901`). Ne pas recréer de `helm/` dans ce dépôt.
+- [x] Chaîne de déploiement opérationnelle : Jenkins → Harbor → ArgoCD (déployé en `v0.2.0-alpha.51`)
+- [x] RBAC : `get nodes/proxy` (+ `nodes/stats`, `nodes/metrics`) ajouté au rôle in-cluster **et** au rôle du token d'intégration (2026-08-01)
+- [x] `NODE_METRICS_*` et `HELM_AUTODISCOVER` exposés dans les values du chart
+- [ ] **Reste** : `envs/staging/values.yaml` n'a pas de `jwtSecret` → le rendu du chart échoue pour staging (`A jwtSecret is required`). Préexistant, à corriger avant de déployer staging
+- [ ] **Reste** : vérifier sur le cluster que les jauges nœuds se remplissent après la synchro ArgoCD
 
 ### 3. Ensuite — Pilotage MVP *(cœur de la vision, via l'API server)*
 - [ ] Deploy d'un manifest (server-side apply)
@@ -63,7 +66,6 @@
 - [x] Page Settings (utilisateurs, infos système)
 - [ ] Page History (audit log)
 - [x] UI registries privés (Harbor, ECR, GCR, ACR) + dépôts de charts Helm
-- [ ] CI : build/push des images `ghcr.io/kubepilot/{backend,frontend}` (bloque le déploiement in-cluster réel)
 
 ---
 
