@@ -85,7 +85,22 @@ func (s *Store) GetWorkload(ctx context.Context, id string) (*models.Workload, e
 
 // UpsertWorkload inserts or updates a workload by cluster+namespace+name+kind.
 func (s *Store) UpsertWorkload(ctx context.Context, workload *models.Workload) error {
-	if workload.ID == uuid.Nil {
+	// Reuse the surviving row's primary key when the workload is already known.
+	// ON CONFLICT DO UPDATE does not report that id back to Go, so a freshly
+	// generated UUID would leave the caller attaching container images to a
+	// workload row that does not exist — orphans that silently break the image
+	// watcher (it detects a newer tag, then GetWorkload fails and no finding is created).
+	var existing []uuid.UUID
+	if err := s.DB.WithContext(ctx).Model(&models.Workload{}).
+		Where("cluster_id = ? AND namespace_name = ? AND name = ? AND kind = ?",
+			workload.ClusterID, workload.NamespaceName, workload.Name, workload.Kind).
+		Limit(1).Pluck("id", &existing).Error; err != nil {
+		return err
+	}
+	switch {
+	case len(existing) > 0:
+		workload.ID = existing[0]
+	case workload.ID == uuid.Nil:
 		workload.ID = uuid.New()
 	}
 	workload.LastSeenAt = time.Now()
@@ -111,11 +126,44 @@ func (s *Store) UpsertWorkload(ctx context.Context, workload *models.Workload) e
 		Create(workload).Error
 }
 
-// DeleteWorkloadsNotSeenSince removes stale workloads for a cluster.
+// DeleteWorkloadsNotSeenSince removes stale workloads for a cluster, along with
+// their container_images and image_tag_observations, and resolves any findings
+// still open against them. AutoMigrate (SQLite/Postgres) does not create the
+// ON DELETE CASCADE that migrations/001_initial.sql defines for Postgres, so
+// without this, orphaned container_images pile up and silently break the image
+// watcher: it detects a real newer tag, then GetWorkload fails with record-not-found
+// (on the watcher's expected-error list, so never surfaced) and no finding is ever created.
 func (s *Store) DeleteWorkloadsNotSeenSince(ctx context.Context, clusterID string, since time.Time) error {
-	return s.DB.WithContext(ctx).
+	var staleIDs []uuid.UUID
+	if err := s.DB.WithContext(ctx).Model(&models.Workload{}).
 		Where("cluster_id = ? AND last_seen_at < ?", clusterID, since).
-		Delete(&models.Workload{}).Error
+		Pluck("id", &staleIDs).Error; err != nil {
+		return err
+	}
+	if len(staleIDs) == 0 {
+		return nil
+	}
+
+	var imageIDs []uuid.UUID
+	if err := s.DB.WithContext(ctx).Model(&models.ContainerImage{}).
+		Where("workload_id IN ?", staleIDs).Pluck("id", &imageIDs).Error; err != nil {
+		return err
+	}
+
+	if err := s.resolveActiveFindings(ctx, "workload_id IN ?", staleIDs); err != nil {
+		return err
+	}
+	if len(imageIDs) > 0 {
+		if err := s.DB.WithContext(ctx).Where("image_id IN ?", imageIDs).
+			Delete(&models.ImageTagObservation{}).Error; err != nil {
+			return err
+		}
+	}
+	if err := s.DB.WithContext(ctx).Where("workload_id IN ?", staleIDs).
+		Delete(&models.ContainerImage{}).Error; err != nil {
+		return err
+	}
+	return s.DB.WithContext(ctx).Where("id IN ?", staleIDs).Delete(&models.Workload{}).Error
 }
 
 // ListContainerImages returns all container images for a workload.

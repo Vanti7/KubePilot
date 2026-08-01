@@ -347,7 +347,10 @@ type UpdateFinding struct {
 	Title             string         `gorm:"not null"                                       json:"title"`
 	Description       string         `                                                      json:"description,omitempty"`
 	ReleaseNotes      string         `                                                      json:"release_notes,omitempty"`
-	CVEs              datatypes.JSON `gorm:"type:jsonb;default:'[]'"                        json:"cves,omitempty"`
+	// column:cves is explicit — GORM's naming strategy maps the CVEs field to
+	// "cv_es", which breaks UpsertFinding's ON CONFLICT list and diverges from
+	// migrations/001_initial.sql (PostgreSQL), where the column is "cves".
+	CVEs              datatypes.JSON `gorm:"column:cves;type:jsonb;default:'[]'"            json:"cves,omitempty"`
 	Metadata          datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"metadata,omitempty"`
 	FirstDetectedAt   time.Time      `gorm:"not null"                                       json:"first_detected_at"`
 	LastObservedAt    time.Time      `gorm:"not null"                                       json:"last_observed_at"`

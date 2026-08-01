@@ -18,6 +18,9 @@
 
 ## ✅ Fait récemment
 
+- [x] **Findings d'image réels** (2026-08-01) — 5 bugs cumulés corrigés, validés contre le cluster Lab Cyllene : 20 findings réels remontés (Traefik, CoreDNS, kube-proxy, metrics-server, Harbor…). Voir `CHANGELOG.md` pour le détail
+- [x] Gestion des registries privés — page Registries, CRUD API, credentials + `tls_insecure` par registre
+- [x] Page Settings (users + infos système), export CSV des findings, command palette `Ctrl+K`, détail cluster enrichi
 - [x] Métriques système des nœuds — agentless via kubelet Summary API, time-series `node_metrics`, jauges + sparklines (tier desktop)
 - [x] Vue globale ressources système sur le dashboard (style Proxmox/vCenter) — jauges CPU/RAM/disque agrégées + par cluster
 - [x] Mode démo (`DEMO_MODE=true`) — seed multi-cluster, collectors désactivés, login `admin@kubepilot.local` / `demo`
@@ -27,12 +30,13 @@
 
 ## 🔜 Séquencement proposé
 
-### 1. Maintenant — Rendre les findings réels *(tier desktop, débloque l'utilité)*
-> Sans ça l'app reste une vitrine d'inventaire (cf. CLAUDE.md, marqué bloquant).
-- [ ] Auth Docker Hub : corriger le token anonyme (renvoie 401)
-- [ ] TLS/CA par registre (Harbor self-signed, `TLS_INSECURE` par registre)
-- [ ] Nettoyage en cascade des `container_images` orphelines au `DeleteWorkloadsNotSeenSince`
-- [ ] Vérifier de bout en bout qu'un finding réel remonte (image + helm)
+### 1. ~~Rendre les findings réels~~ ✅ *(fait le 2026-08-01)*
+- [x] Auth Docker Hub : token anonyme + préfixe `library/` cohérent scope/chemin
+- [x] TLS/CA par registre (Harbor self-signed, `tls_insecure` par registre)
+- [x] Nettoyage en cascade des `container_images` orphelines au `DeleteWorkloadsNotSeenSince`
+- [x] Vérifié de bout en bout : 20 findings image réels sur Lab Cyllene
+- [ ] **Reste** : faux positifs semver sur les repos à versionnage non-standard (`mysql 8.0 → 26.7`, `goharbor/redis-photon v2.14.3 → 4.0`) — `findNewerTag` prend tous les tags parsables au mot
+- [ ] **Reste** : valider un finding **Helm** réel (seul le chemin image est prouvé)
 
 ### 2. Prérequis tiering — Chart Helm
 > ⚠️ Listé « livré » dans CLAUDE.md mais **absent du repo** (`helm/`). Tout le tier in-cluster en dépend.

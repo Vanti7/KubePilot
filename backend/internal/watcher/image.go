@@ -218,12 +218,20 @@ func (iw *ImageWatcher) CheckImage(ctx context.Context, image *models.ContainerI
 
 // fetchTags calls the OCI registry API to list available tags.
 func (iw *ImageWatcher) fetchTags(ctx context.Context, image *models.ContainerImage) ([]string, error) {
+	isDockerHub := image.Registry == "docker.io"
 	registry := image.Registry
-	if registry == "docker.io" {
+	repository := image.Repository
+	if isDockerHub {
 		registry = "registry-1.docker.io"
+		// Official images (e.g. "traefik", "nginx") live under the "library/"
+		// namespace on Docker Hub — the token scope and the request path must
+		// agree on this prefix, or the registry rejects the token as out of scope.
+		if !strings.Contains(repository, "/") {
+			repository = "library/" + repository
+		}
 	}
 
-	url := fmt.Sprintf("https://%s/v2/%s/tags/list", registry, image.Repository)
+	url := fmt.Sprintf("https://%s/v2/%s/tags/list", registry, repository)
 
 	client := iw.clientFor(image)
 
@@ -251,8 +259,10 @@ func (iw *ImageWatcher) fetchTags(ctx context.Context, image *models.ContainerIm
 	defer resp.Body.Close()
 
 	// Docker Hub returns 401 for public images without a token; get one and retry.
-	if resp.StatusCode == http.StatusUnauthorized {
-		token, tokenErr := iw.getDockerHubToken(ctx, image.Repository)
+	// Only Docker Hub: auth.docker.io is its token authority alone — presenting one
+	// of its tokens to another registry (ghcr.io, ECR Public...) just gets a 403.
+	if isDockerHub && resp.StatusCode == http.StatusUnauthorized {
+		token, tokenErr := iw.getDockerHubToken(ctx, repository)
 		if tokenErr != nil {
 			return nil, fmt.Errorf("docker hub auth: %w", tokenErr)
 		}
@@ -282,12 +292,9 @@ func (iw *ImageWatcher) fetchTags(ctx context.Context, image *models.ContainerIm
 }
 
 // getDockerHubToken retrieves an anonymous Bearer token for Docker Hub.
+// repository must already be in its final request form (see fetchTags — official
+// images need the "library/" prefix in both the token scope and the request path).
 func (iw *ImageWatcher) getDockerHubToken(ctx context.Context, repository string) (string, error) {
-	// Ensure repository is prefixed for official images.
-	if !strings.Contains(repository, "/") {
-		repository = "library/" + repository
-	}
-
 	url := fmt.Sprintf(
 		"https://auth.docker.io/token?service=registry.docker.io&scope=repository:%s:pull",
 		repository,
