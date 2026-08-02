@@ -27,6 +27,7 @@ import type {
   AppSettings,
   SystemResources,
   ManifestApplyResponse,
+  RemediateFindingResponse,
 } from '../types'
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
@@ -253,6 +254,13 @@ export async function updateFindingStatus(
 
 export async function getFindingSummary(): Promise<FindingSummary> {
   const { data } = await api.get<FindingSummary>('/findings/summary')
+  return data
+}
+
+// Applies the real fix a finding represents (image tag bump or Helm
+// upgrade) — unlike updateFindingStatus, this mutates the cluster.
+export async function remediateFinding(id: string): Promise<RemediateFindingResponse> {
+  const { data } = await api.post<RemediateFindingResponse>(`/findings/${id}/remediate`)
   return data
 }
 

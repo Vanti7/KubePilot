@@ -73,3 +73,41 @@ func RestartWorkload(ctx context.Context, clientset kubernetes.Interface, kind, 
 		return fmt.Errorf("restart is not supported for kind %q", kind)
 	}
 }
+
+// SetContainerImage bumps a single container's image, the same operation
+// `kubectl set image` performs. Uses a strategic merge patch rather than a
+// plain JSON merge patch: spec.template.spec.containers is a list, and a
+// JSON merge patch replaces a list wholesale — it would delete every other
+// container in a multi-container pod. Kubernetes' strategic merge patch
+// knows this field's patchMergeKey is "name", so supplying just the target
+// container merges by name instead, leaving the others untouched.
+func SetContainerImage(ctx context.Context, clientset kubernetes.Interface, kind, namespace, name, containerName, image string) error {
+	patch, err := json.Marshal(map[string]any{
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []map[string]any{
+						{"name": containerName, "image": image},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	switch kind {
+	case "Deployment":
+		_, err := clientset.AppsV1().Deployments(namespace).Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+		return err
+	case "StatefulSet":
+		_, err := clientset.AppsV1().StatefulSets(namespace).Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+		return err
+	case "DaemonSet":
+		_, err := clientset.AppsV1().DaemonSets(namespace).Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+		return err
+	default:
+		return fmt.Errorf("set image is not supported for kind %q", kind)
+	}
+}

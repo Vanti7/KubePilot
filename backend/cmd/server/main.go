@@ -81,19 +81,6 @@ func runServer() {
 		Retention: time.Duration(cfg.NodeMetricsRetentionHours) * time.Hour,
 	})
 
-	if cfg.LogLevel != "debug" {
-		gin.SetMode(gin.ReleaseMode)
-	}
-	router := api.NewRouter(cfg, s, bus, colMgr, version, logger)
-
-	srv := &http.Server{
-		Addr:         ":" + cfg.Port,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -134,6 +121,36 @@ func runServer() {
 				}
 			}
 		}()
+	}
+
+	if cfg.LogLevel != "debug" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
+	// A nil *watcher.ImageWatcher/*watcher.HelmWatcher (demo mode) must not be
+	// passed directly as the handlers.ImageChecker/HelmChecker interface: a
+	// nil concrete pointer boxed in a non-nil interface value is NOT a nil
+	// interface (the classic Go typed-nil gotcha) — FindingHandler's own
+	// `if h.imageChecker == nil` guard would then miss it, and calling
+	// CheckImage on a nil *ImageWatcher would panic. Only assign when the
+	// concrete pointer is genuinely non-nil, leaving the interface at its
+	// real nil zero value otherwise.
+	var imageChecker handlers.ImageChecker
+	var helmChecker handlers.HelmChecker
+	if imgWatcher != nil {
+		imageChecker = imgWatcher
+	}
+	if helmWatcher != nil {
+		helmChecker = helmWatcher
+	}
+
+	router := api.NewRouter(cfg, s, bus, colMgr, imageChecker, helmChecker, version, logger)
+	srv := &http.Server{
+		Addr:         ":" + cfg.Port,
+		Handler:      router,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {

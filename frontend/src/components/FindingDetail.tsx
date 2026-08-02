@@ -1,9 +1,30 @@
-import { ExternalLink, Copy, Clock, Server, Package } from 'lucide-react'
+import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { ExternalLink, Wrench, Clock, Server, Package } from 'lucide-react'
 import clsx from 'clsx'
 import { SeverityBadge } from './SeverityBadge'
 import { FindingStatusMenu } from './FindingStatusMenu'
+import { remediateFinding } from '../api/client'
 import type { UpdateFinding } from '../types'
 import { formatAge, formatRelative, scoreToColor, scoreToBg, buildHeadlampURL, updateTypeLabel } from '../utils/formatting'
+
+// Statuses RemediateFinding accepts server-side (store.IsActiveFindingStatus) —
+// mirrored here so the button doesn't invite a click that the API would 400.
+const ACTIONABLE_STATUSES = new Set(['open', 'planned', 'approved'])
+
+// A real fix (image bump / Helm upgrade) only shows up as "resolved" once the
+// collector re-syncs the live state AND the watcher re-checks it — the
+// backend retries this itself for ~21s (3s/6s/12s). Re-invalidate a bit
+// longer than that window to reliably catch the resolution.
+function refreshAfterFix(qc: ReturnType<typeof useQueryClient>) {
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['findings'] })
+    qc.invalidateQueries({ queryKey: ['workloads'] })
+    qc.invalidateQueries({ queryKey: ['helm'] })
+  }
+  invalidate()
+  ;[2000, 5000, 10000, 20000].forEach((ms) => setTimeout(invalidate, ms))
+}
 
 const UPDATE_TYPE_STYLES: Record<string, string> = {
   major: 'bg-red-950/60 text-red-400 border border-red-900/50',
@@ -14,6 +35,7 @@ const UPDATE_TYPE_STYLES: Record<string, string> = {
 
 interface Props {
   finding: UpdateFinding
+  canWrite?: boolean
 }
 
 function ScoreBar({ score }: { score: number }) {
@@ -32,7 +54,12 @@ function ScoreBar({ score }: { score: number }) {
   )
 }
 
-export function FindingDetail({ finding }: Props) {
+export function FindingDetail({ finding, canWrite }: Props) {
+  const qc = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  const [fixError, setFixError] = useState('')
+  const [applied, setApplied] = useState(false)
+
   const headlampBase = import.meta.env.VITE_HEADLAMP_URL || 'http://localhost:4466'
   // Helm findings carry no workload, so there is no Kubernetes resource to link to.
   const headlampURL =
@@ -46,15 +73,29 @@ export function FindingDetail({ finding }: Props) {
         )
       : null
 
-  function copyToClipboard(text: string) {
-    navigator.clipboard.writeText(text).catch(() => {})
-  }
-
   const isHelm = finding.kind === 'helm'
-  const helmCommand =
-    isHelm && finding.helm_release_name
-      ? `helm upgrade ${finding.helm_release_name} --version ${finding.latest_version} -n ${finding.namespace_name}`
-      : null
+  const isImage = finding.kind === 'image'
+  const canFixHelm = isHelm && !!finding.helm_release_name
+  const canFixImage = isImage && !!finding.container_name && !!finding.image_registry && !!finding.image_repository
+  const canFix = canWrite && ACTIONABLE_STATUSES.has(finding.status) && (canFixHelm || canFixImage)
+
+  async function handleFix() {
+    const target = finding.workload_name || finding.helm_release_name || finding.title
+    if (!confirm(`Update ${target} to ${finding.latest_version} now? This changes the live cluster.`)) {
+      return
+    }
+    setBusy(true)
+    setFixError('')
+    try {
+      await remediateFinding(finding.id)
+      setApplied(true)
+      refreshAfterFix(qc)
+    } catch (e: any) {
+      setFixError(e?.response?.data?.error || e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="p-4 space-y-5">
@@ -165,6 +206,24 @@ export function FindingDetail({ finding }: Props) {
 
       {/* Actions */}
       <div className="space-y-2">
+        {canFix && (
+          <button
+            className="btn btn-primary w-full justify-center"
+            disabled={busy}
+            onClick={handleFix}
+          >
+            <Wrench size={14} className={busy ? 'animate-pulse' : ''} />
+            {busy ? 'Applying…' : `Fix now → ${finding.latest_version}`}
+          </button>
+        )}
+        {applied && (
+          <div className="px-3 py-2 rounded bg-green-950/60 border border-green-900/50 text-green-400 text-xs">
+            Applied — the finding will resolve automatically within a few seconds once the fix is confirmed.
+          </div>
+        )}
+        {fixError && (
+          <div className="px-3 py-2 rounded bg-red-950/60 border border-red-900/50 text-red-400 text-xs">{fixError}</div>
+        )}
         {headlampURL && (
           <a
             href={headlampURL}
@@ -175,23 +234,6 @@ export function FindingDetail({ finding }: Props) {
             <ExternalLink size={14} />
             Open in Headlamp
           </a>
-        )}
-        {helmCommand && (
-          <div className="panel p-3 space-y-2">
-            <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Upgrade Command</div>
-            <div className="flex items-start gap-2">
-              <code className="flex-1 text-xs font-mono text-green-400 bg-surface-elevated p-2 rounded break-all">
-                {helmCommand}
-              </code>
-              <button
-                className="btn btn-secondary flex-shrink-0 p-1.5"
-                onClick={() => copyToClipboard(helmCommand)}
-                title="Copy command"
-              >
-                <Copy size={14} />
-              </button>
-            </div>
-          </div>
         )}
       </div>
     </div>

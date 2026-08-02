@@ -173,6 +173,18 @@ export interface UpdateFinding {
   helm_release_name?: string // set for helm findings, which have no workload
   cluster_name?: string
   namespace_name?: string
+  // Set for image findings only — needed to show/build the "Fix now" target
+  // image reference (registry/repository:latest_version); the finding row
+  // itself only carries the tag (latest_version), not the rest of the ref.
+  container_name?: string
+  image_registry?: string
+  image_repository?: string
+}
+
+export interface RemediateFindingResponse {
+  id: string
+  kind: string
+  detail: Record<string, any>
 }
 
 export interface RiskScore {

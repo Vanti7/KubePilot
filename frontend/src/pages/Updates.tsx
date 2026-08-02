@@ -19,6 +19,7 @@ import { SlideOver } from '../components/SlideOver'
 import { FindingDetail } from '../components/FindingDetail'
 import { useFindingsFilter, useFindings, type FindingsFilterState } from '../hooks/useFindings'
 import { useClusters } from '../hooks/useClusters'
+import { useAuth } from '../contexts/AuthContext'
 import { updateFindingStatus, getRegistries, exportFindingsCsv } from '../api/client'
 import type { UpdateFinding, Severity, FindingStatus, UpdateType } from '../types'
 import { formatAge, scoreToColor, scoreToBg, updateTypeLabel } from '../utils/formatting'
@@ -106,6 +107,8 @@ function MultiSelectPill<T extends string>({
 
 export function Updates({ initialFilter }: { initialFilter?: Partial<FindingsFilterState> } = {}) {
   const [searchParams] = useSearchParams()
+  const { user } = useAuth()
+  const canWrite = user?.role === 'admin' || user?.role === 'operator'
   const { filter, setFilter, apiFilter } = useFindingsFilter(initialFilter)
   const { data, isLoading } = useFindings(apiFilter)
   const { data: clusters = [] } = useClusters()
@@ -445,7 +448,7 @@ export function Updates({ initialFilter }: { initialFilter?: Partial<FindingsFil
         title={activeFinding ? (activeFinding.workload_name || activeFinding.helm_release_name || activeFinding.title) : ''}
         width="42%"
       >
-        {activeFinding && <FindingDetail finding={activeFinding} />}
+        {activeFinding && <FindingDetail finding={activeFinding} canWrite={canWrite} />}
       </SlideOver>
     </div>
   )

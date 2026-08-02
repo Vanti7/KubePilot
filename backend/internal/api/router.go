@@ -16,6 +16,8 @@ func NewRouter(
 	s *store.Store,
 	bus *handlers.EventBus,
 	syncer handlers.ClusterOps,
+	imageChecker handlers.ImageChecker,
+	helmChecker handlers.HelmChecker,
 	version string,
 	logger *zap.Logger,
 ) *gin.Engine {
@@ -88,7 +90,7 @@ func NewRouter(
 	}
 
 	// Findings.
-	findingH := handlers.NewFindingHandler(s, logger)
+	findingH := handlers.NewFindingHandler(s, syncer, imageChecker, helmChecker, logger)
 	findings := v1.Group("/findings")
 	{
 		findings.GET("", findingH.ListFindings)
@@ -96,6 +98,7 @@ func NewRouter(
 		findings.GET("/export", findingH.ExportFindings)
 		findings.GET("/:id", findingH.GetFinding)
 		findings.PATCH("/:id/status", middleware.RequireRole("operator"), findingH.UpdateFindingStatus)
+		findings.POST("/:id/remediate", middleware.RequireRole("operator"), findingH.RemediateFinding)
 	}
 
 	// Workloads.

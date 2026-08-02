@@ -89,6 +89,7 @@ const (
 	ActionLogHelmUpgrade    = "helm_upgrade"
 	ActionLogHelmRollback   = "helm_rollback"
 	ActionLogDeployManifest = "deploy_manifest"
+	ActionLogUpdateImage    = "update_image"
 )
 
 // Action log outcome

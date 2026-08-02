@@ -25,18 +25,25 @@ type FindingFilter struct {
 // FindingWithScore joins an UpdateFinding with its RiskScore and related names.
 type FindingWithScore struct {
 	models.UpdateFinding
-	Score        *float64 `json:"score,omitempty"`
-	ScoreSeverity string  `json:"score_severity,omitempty"`
-	WorkloadName string   `json:"workload_name,omitempty"`
+	Score         *float64 `json:"score,omitempty"`
+	ScoreSeverity string   `json:"score_severity,omitempty"`
+	WorkloadName  string   `json:"workload_name,omitempty"`
 	// WorkloadKind is the Kubernetes kind (Deployment, DaemonSet, StatefulSet) —
 	// distinct from UpdateFinding.Kind, which is the finding type (image/helm).
 	// The UI needs it to build a resource link.
-	WorkloadKind string   `json:"workload_kind,omitempty"`
-	ClusterName  string   `json:"cluster_name,omitempty"`
+	WorkloadKind string `json:"workload_kind,omitempty"`
+	ClusterName  string `json:"cluster_name,omitempty"`
 	// ScoreFactors is the per-factor breakdown behind Score, shown in the detail panel.
 	ScoreFactors datatypes.JSON `json:"score_factors,omitempty"`
 	// HelmReleaseName is set for helm findings, which have no workload to name.
 	HelmReleaseName string `json:"helm_release_name,omitempty"`
+	// ContainerName/ImageRegistry/ImageRepository are set for image findings —
+	// the "Fix now" remediation needs them to build the target image
+	// reference (registry/repository:latest_version); the finding row itself
+	// only carries the tag (LatestVersion), not the rest of the image ref.
+	ContainerName   string `json:"container_name,omitempty"`
+	ImageRegistry   string `json:"image_registry,omitempty"`
+	ImageRepository string `json:"image_repository,omitempty"`
 }
 
 // FindingSummary holds counts of findings by severity.
@@ -84,13 +91,16 @@ func (s *Store) ListFindings(ctx context.Context, filter FindingFilter) ([]Findi
 
 	type row struct {
 		models.UpdateFinding
-		Score         *float64 `gorm:"column:score"`
-		ScoreSeverity string   `gorm:"column:score_severity"`
-		WorkloadName  string   `gorm:"column:workload_name"`
-		WorkloadKind  string   `gorm:"column:workload_kind"`
-		ClusterName   string   `gorm:"column:cluster_name"`
-		ScoreFactors  datatypes.JSON `gorm:"column:score_factors"`
-		HelmReleaseName string `gorm:"column:helm_release_name"`
+		Score           *float64       `gorm:"column:score"`
+		ScoreSeverity   string         `gorm:"column:score_severity"`
+		WorkloadName    string         `gorm:"column:workload_name"`
+		WorkloadKind    string         `gorm:"column:workload_kind"`
+		ClusterName     string         `gorm:"column:cluster_name"`
+		ScoreFactors    datatypes.JSON `gorm:"column:score_factors"`
+		HelmReleaseName string         `gorm:"column:helm_release_name"`
+		ContainerName   string         `gorm:"column:container_name"`
+		ImageRegistry   string         `gorm:"column:image_registry"`
+		ImageRepository string         `gorm:"column:image_repository"`
 	}
 
 	rowsQ := s.DB.WithContext(ctx).
@@ -102,11 +112,15 @@ func (s *Store) ListFindings(ctx context.Context, filter FindingFilter) ([]Findi
 			w.name  AS workload_name,
 			w.kind  AS workload_kind,
 			hr.name AS helm_release_name,
-			c.name  AS cluster_name`).
+			c.name  AS cluster_name,
+			ci.container_name AS container_name,
+			ci.registry       AS image_registry,
+			ci.repository     AS image_repository`).
 		Joins("LEFT JOIN risk_scores rs ON rs.finding_id = uf.id").
 		Joins("LEFT JOIN workloads w  ON w.id  = uf.workload_id").
 		Joins("LEFT JOIN helm_releases hr ON hr.id = uf.helm_release_id").
-		Joins("LEFT JOIN clusters c  ON c.id  = uf.cluster_id")
+		Joins("LEFT JOIN clusters c  ON c.id  = uf.cluster_id").
+		Joins("LEFT JOIN container_images ci ON ci.id = uf.container_image_id")
 
 	if filter.ClusterID != "" {
 		rowsQ = rowsQ.Where("uf.cluster_id = ?", filter.ClusterID)
@@ -137,14 +151,17 @@ func (s *Store) ListFindings(ctx context.Context, filter FindingFilter) ([]Findi
 	out := make([]FindingWithScore, len(rows))
 	for i, r := range rows {
 		out[i] = FindingWithScore{
-			UpdateFinding: r.UpdateFinding,
-			Score:         r.Score,
-			ScoreSeverity: r.ScoreSeverity,
-			WorkloadName:  r.WorkloadName,
-			WorkloadKind:  r.WorkloadKind,
-			ClusterName:   r.ClusterName,
-			ScoreFactors:  r.ScoreFactors,
+			UpdateFinding:   r.UpdateFinding,
+			Score:           r.Score,
+			ScoreSeverity:   r.ScoreSeverity,
+			WorkloadName:    r.WorkloadName,
+			WorkloadKind:    r.WorkloadKind,
+			ClusterName:     r.ClusterName,
+			ScoreFactors:    r.ScoreFactors,
 			HelmReleaseName: r.HelmReleaseName,
+			ContainerName:   r.ContainerName,
+			ImageRegistry:   r.ImageRegistry,
+			ImageRepository: r.ImageRepository,
 		}
 	}
 	return out, total, nil
@@ -292,6 +309,18 @@ var activeFindingStatuses = []string{
 	models.FindingStatusOpen,
 	models.FindingStatusPlanned,
 	models.FindingStatusApproved,
+}
+
+// IsActiveFindingStatus reports whether status is one a remediation action
+// should be allowed on — the same set resolveActiveFindings auto-resolves
+// once the underlying resource is confirmed up-to-date.
+func IsActiveFindingStatus(status string) bool {
+	for _, s := range activeFindingStatuses {
+		if s == status {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveActiveFindingForImage marks any still-active finding for the given container

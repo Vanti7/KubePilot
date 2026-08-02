@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -30,6 +31,23 @@ type ClusterOps interface {
 	ClusterSyncer
 	ClientsetProvider
 	RESTConfigProvider
+}
+
+// ImageChecker triggers an immediate single-image recheck against its
+// registry rather than waiting for the next periodic image-watcher pass —
+// used right after a real fix (see FindingHandler.RemediateFinding) so the
+// corresponding finding can resolve within seconds instead of up to
+// WORKER_INTERVAL_SECONDS later. Implemented by *watcher.ImageWatcher
+// (CheckImage is already exported for its own per-tick loop); kept as an
+// interface here so the api package never imports internal/watcher.
+type ImageChecker interface {
+	CheckImage(ctx context.Context, image *models.ContainerImage) error
+}
+
+// HelmChecker is ImageChecker's Helm-release equivalent, implemented by
+// *watcher.HelmWatcher (CheckRelease).
+type HelmChecker interface {
+	CheckRelease(ctx context.Context, release *models.HelmRelease) error
 }
 
 // ClusterHandler handles cluster CRUD endpoints.
