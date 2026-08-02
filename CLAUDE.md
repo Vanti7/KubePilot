@@ -249,6 +249,7 @@ Voir `docs/scoring.md` pour la formule complète.
 - RBAC multi-rôles par cluster/namespace
 - Registries privés complets (Harbor, ECR, GCR, ACR)
 - Intégration Argo CD (lecture seule)
+- Intégration Zabbix (sens du flux pas encore tranché — voir `docs/workflow.md` § Idées à explorer)
 - Inventaire OS/packages nœuds (DaemonSet agent ou SSH)
 - OIDC via Dex
 

@@ -80,6 +80,15 @@ Le rollout déclenché par notre push RBAC est resté bloqué sur deux problème
 
 ---
 
+## 💡 Idées à explorer *(pas encore cadrées — à affiner avant de séquencer)*
+
+- **Intégration Zabbix** (2026-08-02) — idée à chaud, direction pas encore tranchée :
+  - *Sortant* : pousser les findings / le score de risque comme items/triggers Zabbix (alerting unifié avec le reste du homelab déjà sous Zabbix ?)
+  - *Entrant* : consommer les hôtes/métriques déjà suivis par Zabbix comme source d'inventaire complémentaire (recoupement avec les nœuds K8s ?)
+  - À rapprocher de « Notifications (Slack, webhook, email digest) » et « Intégration Argo CD (lecture seule) » déjà en V2 (`CLAUDE.md`) — même famille (intégration système externe). Reste à clarifier : sens du flux, tier concerné (in-cluster only ?), authentification API Zabbix.
+
+---
+
 ## 🧠 Décisions & notes
 
 - Métriques nœuds = **agentless** (kubelet), passe par le tunnel SSH ; l'agent custom n'est utile que pour l'inventaire OS/packages + CVE système + actions (→ in-cluster).
