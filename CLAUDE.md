@@ -155,11 +155,11 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 - [x] Gestion des registries privés dans l'UI (Harbor, ECR, GCR, ACR) + dépôts de charts Helm
 - [x] Nettoyage en cascade des `container_images` orphelines au `DeleteWorkloadsNotSeenSince`
 - [x] Déploiement in-cluster opérationnel : Jenkins → Harbor → ArgoCD (voir `docs/installation.md` §2)
-- [~] Tests unitaires backend : comparaison semver faite (`internal/watcher/tags_test.go`) ; reste scoring engine + store
+- [~] Tests unitaires backend : comparaison semver faite (`internal/watcher/tags_test.go`) ; scale/restart, deploy manifest et set-image aussi testés (`internal/k8sops`) ; reste scoring engine + le reste du store
 - [ ] Tests d'intégration frontend (Playwright)
-- [ ] Seed data pour démo / développement local
-- [ ] Page Settings (gestion utilisateurs, variables globales)
-- [ ] Page History (audit log des actions)
+- [x] Seed data pour démo / développement local — mode démo (`DEMO_MODE=true`), voir « Périmètre livré »
+- [x] Page Settings (gestion utilisateurs, infos système) — voir « Périmètre livré »
+- [ ] Page History (audit log des actions) — `GET /api/v1/action-logs` existe déjà côté API, pas encore de page dédiée
 
 ---
 
