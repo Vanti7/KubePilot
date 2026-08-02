@@ -47,3 +47,9 @@ build/
 
 # Docker
 .dockerignore
+
+# Local scripts and demo data (not tracked)
+start-demo.ps1
+demo-seed.sql
+_demo-backend.ps1
+_demo-frontend.ps1
