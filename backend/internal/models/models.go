@@ -77,17 +77,18 @@ const (
 
 // Action log action
 const (
-	ActionLogCreate       = "create"
-	ActionLogUpdate       = "update"
-	ActionLogDelete       = "delete"
-	ActionLogUpdateStatus = "update_status"
-	ActionLogResolve      = "resolve"
-	ActionLogIgnore       = "ignore"
-	ActionLogSync         = "sync"
-	ActionLogScale        = "scale"
-	ActionLogRestart      = "restart"
-	ActionLogHelmUpgrade  = "helm_upgrade"
-	ActionLogHelmRollback = "helm_rollback"
+	ActionLogCreate         = "create"
+	ActionLogUpdate         = "update"
+	ActionLogDelete         = "delete"
+	ActionLogUpdateStatus   = "update_status"
+	ActionLogResolve        = "resolve"
+	ActionLogIgnore         = "ignore"
+	ActionLogSync           = "sync"
+	ActionLogScale          = "scale"
+	ActionLogRestart        = "restart"
+	ActionLogHelmUpgrade    = "helm_upgrade"
+	ActionLogHelmRollback   = "helm_rollback"
+	ActionLogDeployManifest = "deploy_manifest"
 )
 
 // Action log outcome

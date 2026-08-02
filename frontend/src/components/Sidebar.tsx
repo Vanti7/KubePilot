@@ -13,6 +13,7 @@ import {
   Plug,
   Network,
   Container,
+  Rocket,
   Settings as SettingsIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -55,11 +56,14 @@ export function Sidebar() {
     },
   ]
 
+  const canWrite = user?.role === 'admin' || user?.role === 'operator'
+
   const inventoryItems: NavItem[] = [
     { to: '/inventory', icon: <Boxes size={16} />, label: 'Workloads' },
     { to: '/nodes', icon: <Server size={16} />, label: 'Nodes' },
     { to: '/helm', icon: <Package size={16} />, label: 'Helm' },
     { to: '/secrets', icon: <KeyRound size={16} />, label: 'Secrets' },
+    ...(canWrite ? [{ to: '/deploy', icon: <Rocket size={16} />, label: 'Deploy' }] : []),
   ]
 
   const systemItems: NavItem[] = [

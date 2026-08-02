@@ -81,7 +81,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ## État actuel du projet
 
-**Version courante** : `v0.2.0-alpha.5` (2026-08-02)
+**Version courante** : `v0.2.0-alpha.6` (2026-08-02)
 **Canal** : alpha
 **Branche principale** : `main`
 
@@ -97,7 +97,8 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 - [x] Middleware JWT auth + RBAC par rôle (`internal/api/middleware`)
 - [x] Piste d'audit `action_logs` interrogeable (`GET /api/v1/action-logs`) + helper `handlers.RecordAction`
 - [x] **Scale / rolling-restart** (`PATCH /api/v1/workloads/:id/scale`, `POST /api/v1/workloads/:id/restart`) — première action d'écriture sur un cluster, package `internal/k8sops`, RBAC in-cluster mis à jour (`kubepilot-gitops`)
-- [x] **Helm upgrade/rollback réels** (`POST /api/v1/helm/:id/upgrade`, `.../rollback`) — SDK `helm.sh/helm/v3`, package `internal/helmops`, RBAC `cluster-admin` (`rbac.helmAdmin`, `kubepilot-gitops`) — dernière brique du Pilotage MVP hors deploy de manifest
+- [x] **Helm upgrade/rollback réels** (`POST /api/v1/helm/:id/upgrade`, `.../rollback`) — SDK `helm.sh/helm/v3`, package `internal/helmops`, RBAC `cluster-admin` (`rbac.helmAdmin`, `kubepilot-gitops`)
+- [x] **Deploy d'un manifest (server-side apply)** (`POST /api/v1/clusters/:id/manifests/apply`) — dernière brique du Pilotage MVP. Package `internal/k8sops/manifest.go` (dynamic client + RESTMapper depuis `CollectorManager.GetRESTConfig`), aucune nouvelle dépendance, aucune migration, aucun changement RBAC (réutilise le binding `cluster-admin` déjà accordé pour Helm)
 - [x] Bootstrap first-run — seed environments, création admin, auto-enregistrement cluster local (`internal/bootstrap`)
 - [x] K8s Collector — Watch API Deployments/DaemonSets/StatefulSets/Nodes/Namespaces + décodage secrets Helm (`internal/collector`)
 - [x] Image Watcher — polling OCI registry, semver comparison, cache Redis (`internal/watcher/image.go`)
@@ -230,6 +231,7 @@ Voir `docs/scoring.md` pour la formule complète.
 - **`CollectorManager.GetRESTConfig(clusterID)`** — miroir de `GetClientset` mais renvoie le `*rest.Config` brut (même tunnel SSH). Nécessaire pour tout ce qui a besoin de plus que le clientset typé (discovery client, RESTMapper) — c'est le cas du SDK Helm.
 - **`internal/helmops`** — Helm upgrade/rollback via le SDK `helm.sh/helm/v3` (v3.14.4, choisi pour son pin `k8s.io/*` en v0.29.0, proche de nos v0.29.3). `restClientGetter` custom enveloppant un `*rest.Config` déjà construit (pattern standard pour brancher le SDK sans fichier kubeconfig). Résolution + téléchargement de chart **volontairement dupliqués** depuis `internal/watcher` (pas de cache nécessaire, déclenché par l'utilisateur) plutôt que de coupler les deux packages.
 - **RBAC Helm = `cluster-admin`** (`kubepilot-gitops`, flag `rbac.helmAdmin`) — décision assumée : un chart peut toucher n'importe quelle ressource (CRD comprises), aucune liste de règles n'est fiable. Point sensible pour tout futur audit sécurité de ce déploiement.
+- **`internal/k8sops/manifest.go`** — deploy d'un manifest brut (server-side apply). `BuildDynamicClient` dérive un dynamic client + RESTMapper d'un `*rest.Config` (même construction que `helmops.restClientGetter`, dupliquée volontairement — pas de type partagé, `restClientGetter` est lié à l'interface Helm SDK). `ApplyManifest` traite chaque document YAML indépendamment : un `Get` préalable distingue `created`/`updated` (nécessaire aussi car le fake dynamic client de client-go v0.29 ne supporte pas la création via `Patch(ApplyPatchType)` — voir `manifest_test.go`, un `Create` explicite est fait quand l'objet n'existe pas encore, un vrai cluster accepterait les deux mais celui-ci est aussi testable). Réutilise le binding `cluster-admin` de Helm — même surface arbitraire, pas de nouveau grant RBAC.
 
 ### MCP (Model Context Protocol)
 - Sous-commande `kubepilot mcp` = serveur MCP JSON-RPC 2.0 sur stdio (`internal/mcp`), stdlib uniquement.

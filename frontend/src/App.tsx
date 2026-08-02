@@ -8,6 +8,7 @@ import { Updates } from './pages/Updates'
 import { Risks } from './pages/Risks'
 import { Inventory } from './pages/Inventory'
 import { HelmPage } from './pages/HelmPage'
+import { Deploy } from './pages/Deploy'
 import { Nodes } from './pages/Nodes'
 import { Integrations } from './pages/Integrations'
 import { Secrets } from './pages/Secrets'
@@ -45,6 +46,7 @@ function ProtectedRoutes() {
           <Route path="/risks" element={<Risks />} />
           <Route path="/inventory" element={<Inventory />} />
           <Route path="/helm" element={<HelmPage />} />
+          <Route path="/deploy" element={<Deploy />} />
           <Route path="/nodes" element={<Nodes />} />
           <Route path="/secrets" element={<Secrets />} />
           <Route path="/registries" element={<Registries />} />

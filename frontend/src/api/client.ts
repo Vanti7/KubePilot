@@ -26,6 +26,7 @@ import type {
   HelmRepositoryTestResult,
   AppSettings,
   SystemResources,
+  ManifestApplyResponse,
 } from '../types'
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
@@ -214,6 +215,19 @@ export async function upgradeHelmRelease(id: string, payload: UpgradeHelmRelease
 
 export async function rollbackHelmRelease(id: string, revision: number): Promise<{ id: string; revision: number }> {
   const { data } = await api.post(`/helm/${id}/rollback`, { revision })
+  return data
+}
+
+// Raw manifest deploy (server-side apply).
+export interface ApplyManifestPayload {
+  manifest: string
+  namespace?: string
+  dry_run?: boolean
+  force?: boolean
+}
+
+export async function applyManifest(clusterId: string, payload: ApplyManifestPayload): Promise<ManifestApplyResponse> {
+  const { data } = await api.post<ManifestApplyResponse>(`/clusters/${clusterId}/manifests/apply`, payload)
   return data
 }
 

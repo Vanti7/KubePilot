@@ -82,6 +82,9 @@ func NewRouter(
 		clusters.PUT("/:id", middleware.RequireRole("operator"), clusterH.UpdateCluster)
 		clusters.DELETE("/:id", middleware.RequireRole("admin"), clusterH.DeleteCluster)
 		clusters.POST("/:id/sync", middleware.RequireRole("operator"), clusterH.SyncCluster)
+
+		manifestH := handlers.NewManifestHandler(s, syncer, logger)
+		clusters.POST("/:id/manifests/apply", middleware.RequireRole("operator"), manifestH.ApplyManifest)
 	}
 
 	// Findings.

@@ -351,6 +351,20 @@ export interface SecretFilter {
   offset?: number
 }
 
+export interface ManifestApplyResult {
+  kind: string
+  name: string
+  namespace?: string
+  operation: 'created' | 'updated' | 'error'
+  error?: string
+}
+
+export interface ManifestApplyResponse {
+  results: ManifestApplyResult[]
+  dry_run: boolean
+  ok: boolean
+}
+
 export interface HelmFilter {
   cluster_id?: string
   namespace_id?: string
