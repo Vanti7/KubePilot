@@ -202,6 +202,21 @@ export async function getHelmRelease(id: string): Promise<HelmRelease> {
   return data
 }
 
+export interface UpgradeHelmReleasePayload {
+  chart_version?: string
+  values?: Record<string, any>
+}
+
+export async function upgradeHelmRelease(id: string, payload: UpgradeHelmReleasePayload): Promise<{ id: string; revision: number; chart_version: string }> {
+  const { data } = await api.post(`/helm/${id}/upgrade`, payload)
+  return data
+}
+
+export async function rollbackHelmRelease(id: string, revision: number): Promise<{ id: string; revision: number }> {
+  const { data } = await api.post(`/helm/${id}/rollback`, { revision })
+  return data
+}
+
 // Findings
 export async function getFindings(filter?: FindingFilter): Promise<PaginatedResponse<UpdateFinding>> {
   const { data } = await api.get<PaginatedResponse<UpdateFinding>>('/findings', { params: filter })

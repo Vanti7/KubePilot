@@ -132,17 +132,18 @@ export interface ContainerImage {
 export interface HelmRelease {
   id: string
   cluster_id: string
-  namespace_id: string
-  release_name: string
+  cluster?: { id: string; name: string; slug: string }
+  namespace_name: string
+  name: string
   chart_name: string
   chart_version: string
-  app_version: string
-  repo_url: string
+  app_version?: string
+  repo_url?: string
   status: string
-  last_deployed_at: string
-  cluster_name?: string
-  namespace_name?: string
-  available_version?: string
+  revision: number
+  values: Record<string, any>
+  last_deployed_at?: string
+  last_seen_at: string
 }
 
 // Mirrors store.FindingWithScore — the flat DTO returned by GET /api/v1/findings.
@@ -305,6 +306,7 @@ export interface FindingFilter {
   severity?: Severity[]
   status?: FindingStatus[]
   update_type?: UpdateType[]
+  kind?: string
   cluster_id?: string
   namespace?: string
   limit?: number

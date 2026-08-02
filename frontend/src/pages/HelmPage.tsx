@@ -1,20 +1,14 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ExternalLink, Copy, Filter } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ExternalLink, ArrowUpCircle, History } from 'lucide-react'
 import clsx from 'clsx'
-import { getHelmReleases } from '../api/client'
+import { getHelmReleases, getHelmRelease, getFindings, upgradeHelmRelease, rollbackHelmRelease } from '../api/client'
 import { useClusters } from '../hooks/useClusters'
+import { useAuth } from '../contexts/AuthContext'
 import { DataTable, Column } from '../components/DataTable'
 import { SlideOver } from '../components/SlideOver'
-import type { HelmRelease, UpdateType } from '../types'
-import { formatAge, updateTypeLabel } from '../utils/formatting'
-
-const UPDATE_TYPE_STYLES: Record<UpdateType, string> = {
-  major: 'bg-red-950/60 text-red-400 border border-red-900/50',
-  minor: 'bg-yellow-950/60 text-yellow-400 border border-yellow-900/50',
-  patch: 'bg-green-950/60 text-green-400 border border-green-900/50',
-  unknown: 'bg-slate-800 text-slate-400 border border-slate-700',
-}
+import type { HelmRelease } from '../types'
+import { formatAge } from '../utils/formatting'
 
 const HELM_STATUS_STYLES: Record<string, string> = {
   deployed: 'text-green-400',
@@ -24,25 +18,92 @@ const HELM_STATUS_STYLES: Record<string, string> = {
   uninstalled: 'text-slate-600',
 }
 
-function guessUpdateType(current: string, available: string): UpdateType {
-  if (!current || !available) return 'unknown'
-  const curr = current.replace(/^v/, '').split('.').map(Number)
-  const avail = available.replace(/^v/, '').split('.').map(Number)
-  if (avail[0] > curr[0]) return 'major'
-  if (avail[1] > curr[1]) return 'minor'
-  if (avail[2] > curr[2]) return 'patch'
-  return 'unknown'
+// Helm releases are only re-polled by the backend collector every 60s (no
+// live Watch), and upgrade/rollback trigger an immediate background pass —
+// but it still runs after the response comes back, so invalidate a couple
+// more times over the next few seconds to actually catch it (same fix
+// applied to workloads' scale/restart).
+function refreshHelmSoon(qc: ReturnType<typeof useQueryClient>, releaseId: string) {
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['helm'] })
+    qc.invalidateQueries({ queryKey: ['helm-release', releaseId] })
+  }
+  invalidate()
+  setTimeout(invalidate, 1500)
+  setTimeout(invalidate, 4000)
 }
 
-function HelmDetail({ release }: { release: HelmRelease }) {
-  const updateType = release.available_version
-    ? guessUpdateType(release.chart_version, release.available_version)
-    : 'unknown'
+function HelmDetail({ releaseId, canWrite }: { releaseId: string; canWrite: boolean }) {
+  const qc = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  const [chartVersion, setChartVersion] = useState('')
+  const [valuesText, setValuesText] = useState('')
+  const [valuesError, setValuesError] = useState('')
+  const [rollbackRevision, setRollbackRevision] = useState('')
+  const [error, setError] = useState('')
 
-  const upgradeCmd = `helm upgrade ${release.release_name} <repo>/${release.chart_name} --version ${release.available_version ?? release.chart_version} -n ${release.namespace_name}`
+  const { data: release } = useQuery({
+    queryKey: ['helm-release', releaseId],
+    queryFn: () => getHelmRelease(releaseId),
+  })
 
-  function copy(text: string) {
-    navigator.clipboard.writeText(text).catch(() => {})
+  // Cross-reference the finding this release already produces (if any) —
+  // "Findings Helm réels" already computes the latest available version,
+  // no need to duplicate that logic here.
+  const { data: findings } = useQuery({
+    queryKey: ['helm-findings', release?.cluster_id],
+    queryFn: () => getFindings({ cluster_id: release?.cluster_id, kind: 'helm', limit: 500 }),
+    enabled: !!release?.cluster_id,
+  })
+  const finding = findings?.data.find((f) => f.helm_release_id === releaseId)
+
+  if (!release) return null
+
+  const valuesPlaceholder = JSON.stringify(release.values ?? {}, null, 2)
+
+  async function handleUpgrade() {
+    setError('')
+    setValuesError('')
+    let values: Record<string, any> | undefined
+    if (valuesText.trim()) {
+      try {
+        values = JSON.parse(valuesText)
+      } catch (e: any) {
+        setValuesError('Invalid JSON: ' + e.message)
+        return
+      }
+    }
+    setBusy(true)
+    try {
+      await upgradeHelmRelease(releaseId, {
+        chart_version: chartVersion.trim() || undefined,
+        values,
+      })
+      refreshHelmSoon(qc, releaseId)
+    } catch (e: any) {
+      setError(e?.response?.data?.error || e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleRollback() {
+    const revision = Number(rollbackRevision)
+    if (!Number.isInteger(revision) || revision < 1) {
+      setError('Revision must be a whole number >= 1')
+      return
+    }
+    if (!confirm(`Roll back ${release!.name} to revision ${revision}?`)) return
+    setError('')
+    setBusy(true)
+    try {
+      await rollbackHelmRelease(releaseId, revision)
+      refreshHelmSoon(qc, releaseId)
+    } catch (e: any) {
+      setError(e?.response?.data?.error || e.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -52,7 +113,7 @@ function HelmDetail({ release }: { release: HelmRelease }) {
         <div className="space-y-1.5 text-xs">
           <div className="flex gap-2">
             <span className="text-slate-500 w-28">Release name</span>
-            <span className="text-slate-200 font-mono">{release.release_name}</span>
+            <span className="text-slate-200 font-mono">{release.name}</span>
           </div>
           <div className="flex gap-2">
             <span className="text-slate-500 w-28">Chart</span>
@@ -64,7 +125,7 @@ function HelmDetail({ release }: { release: HelmRelease }) {
           </div>
           <div className="flex gap-2">
             <span className="text-slate-500 w-28">Cluster</span>
-            <span className="text-slate-300 font-mono">{release.cluster_name}</span>
+            <span className="text-slate-300 font-mono">{release.cluster?.name}</span>
           </div>
           <div className="flex gap-2">
             <span className="text-slate-500 w-28">Status</span>
@@ -73,9 +134,15 @@ function HelmDetail({ release }: { release: HelmRelease }) {
             </span>
           </div>
           <div className="flex gap-2">
-            <span className="text-slate-500 w-28">Last deployed</span>
-            <span className="text-slate-300">{formatAge(release.last_deployed_at)} ago</span>
+            <span className="text-slate-500 w-28">Revision</span>
+            <span className="text-slate-300 font-mono">{release.revision}</span>
           </div>
+          {release.last_deployed_at && (
+            <div className="flex gap-2">
+              <span className="text-slate-500 w-28">Last deployed</span>
+              <span className="text-slate-300">{formatAge(release.last_deployed_at)} ago</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -83,13 +150,10 @@ function HelmDetail({ release }: { release: HelmRelease }) {
         <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Version</div>
         <div className="flex items-center gap-2 font-mono text-sm">
           <span className="text-slate-400">{release.chart_version}</span>
-          {release.available_version && (
+          {finding && (
             <>
               <span className="text-slate-600">→</span>
-              <span className="text-green-400 font-semibold">{release.available_version}</span>
-              <span className={clsx('px-1.5 py-0.5 rounded text-xs font-medium', UPDATE_TYPE_STYLES[updateType])}>
-                {updateTypeLabel(updateType)}
-              </span>
+              <span className="text-green-400 font-semibold">{finding.latest_version}</span>
             </>
           )}
         </div>
@@ -110,39 +174,88 @@ function HelmDetail({ release }: { release: HelmRelease }) {
         </a>
       )}
 
-      {release.available_version && (
-        <div className="panel p-3 space-y-2">
-          <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Upgrade Command</div>
-          <div className="flex items-start gap-2">
-            <code className="flex-1 text-xs font-mono text-green-400 bg-surface-elevated p-2 rounded break-all">
-              {upgradeCmd}
-            </code>
-            <button
-              className="btn btn-secondary flex-shrink-0 p-1.5"
-              onClick={() => copy(upgradeCmd)}
-              title="Copy"
-            >
-              <Copy size={14} />
+      {error && (
+        <div className="px-3 py-2 rounded bg-red-950/60 border border-red-900/50 text-red-400 text-xs">{error}</div>
+      )}
+
+      {canWrite && (
+        <>
+          <div className="panel p-3 space-y-2">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-slate-400 uppercase tracking-wider">
+              <ArrowUpCircle size={13} />
+              Upgrade
+            </div>
+            <div className="space-y-1">
+              <label className="block text-xs text-slate-500">Chart version</label>
+              <input
+                className="input w-full font-mono text-xs"
+                placeholder={release.chart_version}
+                value={chartVersion}
+                onChange={(e) => setChartVersion(e.target.value)}
+              />
+              {finding && !chartVersion && (
+                <button
+                  className="text-xs text-blue-400 hover:text-blue-300"
+                  onClick={() => setChartVersion(finding.latest_version)}
+                >
+                  Use latest ({finding.latest_version})
+                </button>
+              )}
+            </div>
+            <div className="space-y-1">
+              <label className="block text-xs text-slate-500">
+                Values (JSON) <span className="text-slate-600">— leave blank to keep the current values</span>
+              </label>
+              <textarea
+                className="input w-full font-mono text-xs h-40 resize-y"
+                placeholder={valuesPlaceholder}
+                value={valuesText}
+                onChange={(e) => setValuesText(e.target.value)}
+              />
+              {valuesError && <div className="text-xs text-red-400">{valuesError}</div>}
+            </div>
+            <button className="btn btn-primary w-full justify-center" disabled={busy} onClick={handleUpgrade}>
+              {busy ? 'Upgrading...' : 'Upgrade'}
             </button>
           </div>
-        </div>
+
+          <div className="panel p-3 space-y-2">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-slate-400 uppercase tracking-wider">
+              <History size={13} />
+              Rollback
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                className="input flex-1 font-mono text-xs"
+                type="number"
+                min={1}
+                placeholder={`e.g. ${Math.max(1, release.revision - 1)}`}
+                value={rollbackRevision}
+                onChange={(e) => setRollbackRevision(e.target.value)}
+              />
+              <button className="btn btn-secondary flex-shrink-0" disabled={busy} onClick={handleRollback}>
+                {busy ? 'Rolling back...' : 'Rollback'}
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   )
 }
 
 export function HelmPage() {
+  const { user } = useAuth()
+  const canWrite = user?.role === 'admin' || user?.role === 'operator'
   const { data: clusters = [] } = useClusters()
   const [clusterId, setClusterId] = useState('')
-  const [hasUpdatesOnly, setHasUpdatesOnly] = useState(false)
-  const [activeRelease, setActiveRelease] = useState<HelmRelease | null>(null)
+  const [activeReleaseId, setActiveReleaseId] = useState<string | null>(null)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['helm', clusterId, hasUpdatesOnly],
+    queryKey: ['helm', clusterId],
     queryFn: () =>
       getHelmReleases({
         cluster_id: clusterId || undefined,
-        has_updates: hasUpdatesOnly || undefined,
         limit: 100,
       }),
   })
@@ -151,11 +264,11 @@ export function HelmPage() {
 
   const columns: Column<HelmRelease>[] = [
     {
-      key: 'release_name',
+      key: 'name',
       header: 'Release',
       render: (r) => (
         <div>
-          <span className="text-xs font-medium text-slate-200">{r.release_name}</span>
+          <span className="text-xs font-medium text-slate-200">{r.name}</span>
           <span className="ml-2 text-xs text-slate-500 font-mono">{r.chart_name}</span>
         </div>
       ),
@@ -163,27 +276,7 @@ export function HelmPage() {
     {
       key: 'version',
       header: 'Chart Version',
-      render: (r) => {
-        const updateType = r.available_version
-          ? guessUpdateType(r.chart_version, r.available_version)
-          : null
-        return (
-          <div className="flex items-center gap-1.5">
-            <span className="font-mono text-xs text-slate-400">{r.chart_version}</span>
-            {r.available_version && (
-              <>
-                <span className="text-slate-600">→</span>
-                <span className="font-mono text-xs text-green-400">{r.available_version}</span>
-                {updateType && (
-                  <span className={clsx('px-1 py-0.5 text-xs rounded font-medium', UPDATE_TYPE_STYLES[updateType])}>
-                    {updateTypeLabel(updateType)}
-                  </span>
-                )}
-              </>
-            )}
-          </div>
-        )
-      },
+      render: (r) => <span className="font-mono text-xs text-slate-400">{r.chart_version}</span>,
     },
     {
       key: 'app_version',
@@ -197,7 +290,7 @@ export function HelmPage() {
       header: 'Cluster / Namespace',
       render: (r) => (
         <div className="flex flex-col gap-0.5">
-          <span className="text-xs text-slate-300 font-mono">{r.cluster_name}</span>
+          <span className="text-xs text-slate-300 font-mono">{r.cluster?.name}</span>
           <span className="text-xs text-slate-500">{r.namespace_name}</span>
         </div>
       ),
@@ -217,16 +310,17 @@ export function HelmPage() {
       header: 'Deployed',
       width: '80px',
       render: (r) => (
-        <span className="text-xs text-slate-500">{formatAge(r.last_deployed_at)}</span>
+        <span className="text-xs text-slate-500">{r.last_deployed_at ? formatAge(r.last_deployed_at) : '—'}</span>
       ),
     },
   ]
+
+  const activeRelease = releases.find((r) => r.id === activeReleaseId)
 
   return (
     <div className="flex flex-col h-full">
       {/* Filter bar */}
       <div className="flex items-center gap-3 px-4 py-2 border-b border-surface-border bg-surface-panel">
-        <Filter size={13} className="text-slate-500" />
         <select
           className="input py-1 text-xs h-[28px]"
           value={clusterId}
@@ -238,16 +332,6 @@ export function HelmPage() {
           ))}
         </select>
 
-        <label className="flex items-center gap-1.5 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            className="rounded accent-blue-500"
-            checked={hasUpdatesOnly}
-            onChange={(e) => setHasUpdatesOnly(e.target.checked)}
-          />
-          <span className="text-xs text-slate-400">Updates available only</span>
-        </label>
-
         <span className="ml-auto text-xs text-slate-500">{releases.length} releases</span>
       </div>
 
@@ -258,19 +342,19 @@ export function HelmPage() {
           data={releases}
           loading={isLoading}
           rowKey={(r) => r.id}
-          onRowClick={(r) => setActiveRelease(r)}
+          onRowClick={(r) => setActiveReleaseId(r.id)}
           emptyMessage="No Helm releases found"
         />
       </div>
 
       {/* Detail slide-over */}
       <SlideOver
-        open={!!activeRelease}
-        onClose={() => setActiveRelease(null)}
-        title={activeRelease?.release_name || ''}
+        open={!!activeReleaseId}
+        onClose={() => setActiveReleaseId(null)}
+        title={activeRelease?.name || ''}
         width="40%"
       >
-        {activeRelease && <HelmDetail release={activeRelease} />}
+        {activeReleaseId && <HelmDetail releaseId={activeReleaseId} canWrite={canWrite} />}
       </SlideOver>
     </div>
   )
