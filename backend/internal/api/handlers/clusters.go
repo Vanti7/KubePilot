@@ -29,6 +29,7 @@ type ClusterSyncer interface {
 type ClusterOps interface {
 	ClusterSyncer
 	ClientsetProvider
+	RESTConfigProvider
 }
 
 // ClusterHandler handles cluster CRUD endpoints.

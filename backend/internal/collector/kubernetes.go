@@ -17,6 +17,7 @@ import (
 	"github.com/kubepilot/backend/internal/models"
 	"github.com/kubepilot/backend/internal/store"
 	"go.uber.org/zap"
+	"gorm.io/datatypes"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -25,18 +26,18 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"gorm.io/datatypes"
 )
 
 // KubernetesCollector collects workloads, nodes and helm releases from a single cluster.
 type KubernetesCollector struct {
-	clusterID string
-	clientset *kubernetes.Clientset
-	store     *store.Store
-	logger    *zap.Logger
-	stopCh    chan struct{}
-	wg        sync.WaitGroup
-	sshTunnel *sshTunnel // non-nil only for ssh connection mode; closed on Stop
+	clusterID  string
+	clientset  *kubernetes.Clientset
+	restConfig *rest.Config // same config the clientset was built from; needed by callers (e.g. helmops) that need more than the typed clientset (discovery, RESTMapper)
+	store      *store.Store
+	logger     *zap.Logger
+	stopCh     chan struct{}
+	wg         sync.WaitGroup
+	sshTunnel  *sshTunnel // non-nil only for ssh connection mode; closed on Stop
 
 	metrics   MetricsConfig
 	prevNetMu sync.Mutex
@@ -116,14 +117,15 @@ func NewKubernetesCollector(cluster *models.Cluster, s *store.Store, logger *zap
 	}
 
 	return &KubernetesCollector{
-		clusterID: cluster.ID.String(),
-		clientset: clientset,
-		store:     s,
-		logger:    logger.With(zap.String("cluster_id", cluster.ID.String()), zap.String("cluster_name", cluster.Name)),
-		stopCh:    make(chan struct{}),
-		sshTunnel: tunnel,
-		metrics:   metrics,
-		prevNet:   make(map[string]netSample),
+		clusterID:  cluster.ID.String(),
+		clientset:  clientset,
+		restConfig: restConfig,
+		store:      s,
+		logger:     logger.With(zap.String("cluster_id", cluster.ID.String()), zap.String("cluster_name", cluster.Name)),
+		stopCh:     make(chan struct{}),
+		sshTunnel:  tunnel,
+		metrics:    metrics,
+		prevNet:    make(map[string]netSample),
 	}, nil
 }
 
@@ -703,23 +705,23 @@ func nodeFromK8s(clusterID uuid.UUID, n *corev1.Node) *models.Node {
 	conditionsJSON, _ := json.Marshal(n.Status.Conditions)
 
 	return &models.Node{
-		ID:               uuid.New(),
-		ClusterID:        clusterID,
-		Name:             n.Name,
-		Role:             role,
-		Status:           status,
-		K8sVersion:       n.Status.NodeInfo.KubeletVersion,
-		OSImage:          n.Status.NodeInfo.OSImage,
-		KernelVersion:    n.Status.NodeInfo.KernelVersion,
-		ContainerRuntime: n.Status.NodeInfo.ContainerRuntimeVersion,
-		Arch:             n.Status.NodeInfo.Architecture,
-		CapacityCPU:      n.Status.Capacity.Cpu().String(),
-		CapacityMemory:   n.Status.Capacity.Memory().String(),
-		AllocatableCPU:   n.Status.Allocatable.Cpu().String(),
+		ID:                uuid.New(),
+		ClusterID:         clusterID,
+		Name:              n.Name,
+		Role:              role,
+		Status:            status,
+		K8sVersion:        n.Status.NodeInfo.KubeletVersion,
+		OSImage:           n.Status.NodeInfo.OSImage,
+		KernelVersion:     n.Status.NodeInfo.KernelVersion,
+		ContainerRuntime:  n.Status.NodeInfo.ContainerRuntimeVersion,
+		Arch:              n.Status.NodeInfo.Architecture,
+		CapacityCPU:       n.Status.Capacity.Cpu().String(),
+		CapacityMemory:    n.Status.Capacity.Memory().String(),
+		AllocatableCPU:    n.Status.Allocatable.Cpu().String(),
 		AllocatableMemory: n.Status.Allocatable.Memory().String(),
-		Labels:           datatypes.JSON(labelsJSON),
-		Taints:           datatypes.JSON(taintsJSON),
-		Conditions:       datatypes.JSON(conditionsJSON),
+		Labels:            datatypes.JSON(labelsJSON),
+		Taints:            datatypes.JSON(taintsJSON),
+		Conditions:        datatypes.JSON(conditionsJSON),
 	}
 }
 
@@ -892,7 +894,7 @@ type helmRelease struct {
 	Name    string `json:"name"`
 	Version int    `json:"version"`
 	Info    struct {
-		Status      string    `json:"status"`
+		Status       string    `json:"status"`
 		LastDeployed time.Time `json:"last_deployed"`
 	} `json:"info"`
 	Chart struct {

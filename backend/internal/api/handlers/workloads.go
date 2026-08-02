@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 // ClientsetProvider exposes a live Kubernetes client for a cluster with an
@@ -19,6 +20,14 @@ import (
 // the API layer on the collector package.
 type ClientsetProvider interface {
 	GetClientset(clusterID string) (kubernetes.Interface, bool)
+}
+
+// RESTConfigProvider exposes the raw *rest.Config for a cluster with an
+// active collector, for callers that need more than the typed clientset
+// (e.g. helmops, which builds a discovery client and RESTMapper from it).
+// Implemented by collector.CollectorManager.
+type RESTConfigProvider interface {
+	GetRESTConfig(clusterID string) (*rest.Config, bool)
 }
 
 // WorkloadHandler handles workload endpoints.

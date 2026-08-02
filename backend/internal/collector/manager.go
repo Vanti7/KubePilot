@@ -8,6 +8,7 @@ import (
 	"github.com/kubepilot/backend/internal/store"
 	"go.uber.org/zap"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 // MetricsConfig controls node-metrics collection behaviour, shared by every
@@ -119,6 +120,22 @@ func (m *CollectorManager) GetClientset(clusterID string) (kubernetes.Interface,
 		return nil, false
 	}
 	return kc.clientset, true
+}
+
+// GetRESTConfig returns the live *rest.Config for a cluster with an active
+// collector — the same config the clientset was built from (same SSH tunnel
+// dialer for ssh-mode clusters). Callers that need more than the typed
+// clientset (e.g. helmops, which needs a discovery client and RESTMapper)
+// use this instead of GetClientset. Returns false if no collector is
+// currently running for that cluster.
+func (m *CollectorManager) GetRESTConfig(clusterID string) (*rest.Config, bool) {
+	m.mu.Lock()
+	kc, ok := m.collectors[clusterID]
+	m.mu.Unlock()
+	if !ok {
+		return nil, false
+	}
+	return kc.restConfig, true
 }
 
 // RunCron periodically calls SyncClusters and blocks until ctx is cancelled or Stop is called.

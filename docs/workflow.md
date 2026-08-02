@@ -18,6 +18,7 @@
 
 ## ✅ Fait récemment
 
+- [x] **Helm : values, upgrade, rollback réels** (2026-08-02) — dernière brique du Pilotage MVP. `POST /api/v1/helm/:id/upgrade` (values et/ou version, un seul endpoint pour les deux) + `POST /api/v1/helm/:id/rollback`, SDK `helm.sh/helm/v3` (v3.14.4, pin k8s.io v0.29.0, compatible avec nos v0.29.3). Nouveau package `internal/helmops` (RESTClientGetter custom sur `CollectorManager.GetRESTConfig`, résolution+téléchargement de chart indépendant du watcher). RBAC : `ClusterRoleBinding` vers `cluster-admin` (décision assumée — aucune liste de règles ne couvre un chart arbitraire), poussé sur `gitops/dev`. Validé bout en bout sur Lab Cyllene (release headlamp jetable) : upgrade 0.42.0→0.44.0 + values confirmé par `helm history`, rollback vers révision 1 confirmé, `action_logs` OK, DB à jour en quelques secondes (`TriggerSync`, même correctif que scale/restart appliqué dès le départ cette fois)
 - [x] **Scale / rolling-restart** (2026-08-02) — première action d'écriture réelle de KubePilot sur un cluster : `PATCH /api/v1/workloads/:id/scale` + `POST /api/v1/workloads/:id/restart`, réutilisent le clientset déjà vivant du collector (`CollectorManager.GetClientset`), logique isolée et testée dans `internal/k8sops`. Boutons UI sur Inventory. RBAC `update`/`patch` poussé sur `gitops/dev`. Validé de bout en bout sur Lab Cyllene (deployment jetable, nettoyé après coup) : scale 1→3 confirmé par `kubectl`, restart confirmé par l'annotation `restartedAt`, le collector remet `replicas_desired` à jour tout seul, `action_logs` enregistre les deux
 - [x] **Fondations audit trail** (2026-08-02) — `action_logs` interrogeable (`GET /api/v1/action-logs`, paginé/filtrable) + helper `handlers.RecordAction` (rôle via `middleware.RequireRole`, inchangé). Premier test du package `store` (`action_logs_test.go`)
 - [x] **Métriques nœuds réparées en in-cluster** (2026-08-01) — le chart (dépôt `kubepilot-gitops`) n'accordait pas `nodes/proxy` : toutes les jauges restaient vides sans erreur. Corrigé et poussé sur `gitops/dev`
@@ -59,11 +60,11 @@ Le rollout déclenché par notre push RBAC est resté bloqué sur deux problème
 
 **Leçon** : un environnement in-cluster qui accumule un retard de déploiement (ici via un secret non-géré par Argo) peut aussi accumuler des dérives de données qui ne surviennent qu'au moment où on rattrape enfin le retard — l'incident de RBAC a bien été corrigé, mais sa vérification a débusqué deux problèmes plus anciens et plus sérieux.
 
-### 3. Ensuite — Pilotage MVP *(cœur de la vision, via l'API server)*
-- [ ] Deploy d'un manifest (server-side apply)
-- [ ] Édition `values.yaml` Helm + upgrade/rollback (Helm SDK Go)
+### 3. Pilotage MVP *(cœur de la vision, via l'API server)*
+- [ ] Deploy d'un manifest (server-side apply) — **seule brique restante**
+- [x] Édition `values.yaml` Helm + upgrade/rollback (Helm SDK Go)
 - [x] Scale / rolling-restart — `edit ressource` (générique) reste à faire
-- [x] Journalisation des actions (`action_logs`) + garde-fous (rôles) — brancher sur scale/restart, reste deploy/helm-upgrade
+- [x] Journalisation des actions (`action_logs`) + garde-fous (rôles) — branché sur scale/restart et helm upgrade/rollback ; reste deploy manifest
 
 ### 4. Plus tard — Agent hôte *(ancre in-cluster)*
 - [ ] Inventaire OS/packages des nœuds (DaemonSet)
@@ -87,6 +88,8 @@ Le rollout déclenché par notre push RBAC est resté bloqué sur deux problème
 - Statuts findings valides : `open, planned, ignored, approved, blocked, resolved`.
 - UUID assignés côté Go (callback GORM), pas `gen_random_uuid()` (compat SQLite).
 - Mode démo : ne **jamais** lancer les collectors/watchers/scoring (ils écraseraient/purgeraient le seed).
+- **Instance in-cluster = `cluster-admin`** depuis le Helm upgrade/rollback (`kubepilot-gitops`, flag `rbac.helmAdmin`) — un chart peut toucher n'importe quelle ressource, aucune liste de règles n'est fiable. À garder en tête pour tout futur audit sécurité de ce déploiement.
+- **`collectWorkloads` et `collectHelmReleases` n'ont pas de `Watch`** — juste un `List` toutes les 60s (`runPeriodicCollection`). Toute future action d'écriture sur l'un de ces deux types doit appeler `TriggerSync` après coup, sinon l'UI reste sur l'ancienne valeur jusqu'à la prochaine passe.
 
 ## 🛠️ Lancer / tester
 
@@ -103,5 +106,5 @@ cd frontend; $env:VITE_PROXY_TARGET="http://localhost:8090"; npm run dev -- --po
 ## 📌 Rappels process
 
 - **Changelog obligatoire** : toute modif notable → section `[Unreleased]` du `CHANGELOG.md`.
-- **Versioning** : SemVer + cycle alpha/beta/rc/stable (cf. CLAUDE.md). Version courante : `v0.2.0-alpha.4`.
+- **Versioning** : SemVer + cycle alpha/beta/rc/stable (cf. CLAUDE.md). Version courante : `v0.2.0-alpha.5`.
 - **Commits** : Conventional Commits (`type(scope): message`).

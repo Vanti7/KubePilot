@@ -106,11 +106,13 @@ func NewRouter(
 	}
 
 	// Helm releases.
-	helmH := handlers.NewHelmHandler(s, logger)
+	helmH := handlers.NewHelmHandler(s, syncer, logger)
 	helmGroup := v1.Group("/helm")
 	{
 		helmGroup.GET("", helmH.ListHelmReleases)
 		helmGroup.GET("/:id", helmH.GetHelmRelease)
+		helmGroup.POST("/:id/upgrade", middleware.RequireRole("operator"), helmH.UpgradeHelmRelease)
+		helmGroup.POST("/:id/rollback", middleware.RequireRole("operator"), helmH.RollbackHelmRelease)
 	}
 
 	// Nodes.

@@ -81,7 +81,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ## État actuel du projet
 
-**Version courante** : `v0.2.0-alpha.4` (2026-08-02)
+**Version courante** : `v0.2.0-alpha.5` (2026-08-02)
 **Canal** : alpha
 **Branche principale** : `main`
 
@@ -97,6 +97,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 - [x] Middleware JWT auth + RBAC par rôle (`internal/api/middleware`)
 - [x] Piste d'audit `action_logs` interrogeable (`GET /api/v1/action-logs`) + helper `handlers.RecordAction`
 - [x] **Scale / rolling-restart** (`PATCH /api/v1/workloads/:id/scale`, `POST /api/v1/workloads/:id/restart`) — première action d'écriture sur un cluster, package `internal/k8sops`, RBAC in-cluster mis à jour (`kubepilot-gitops`)
+- [x] **Helm upgrade/rollback réels** (`POST /api/v1/helm/:id/upgrade`, `.../rollback`) — SDK `helm.sh/helm/v3`, package `internal/helmops`, RBAC `cluster-admin` (`rbac.helmAdmin`, `kubepilot-gitops`) — dernière brique du Pilotage MVP hors deploy de manifest
 - [x] Bootstrap first-run — seed environments, création admin, auto-enregistrement cluster local (`internal/bootstrap`)
 - [x] K8s Collector — Watch API Deployments/DaemonSets/StatefulSets/Nodes/Namespaces + décodage secrets Helm (`internal/collector`)
 - [x] Image Watcher — polling OCI registry, semver comparison, cache Redis (`internal/watcher/image.go`)
@@ -224,8 +225,11 @@ Voir `docs/scoring.md` pour la formule complète.
 - **`CollectorManager.GetClientset(clusterID)`** (`collector/manager.go`) est le seul point d'entrée pour obtenir un client K8s en dehors de la boucle de collecte — il réutilise le clientset déjà vivant du `KubernetesCollector` (même tunnel SSH auto-réparant pour les clusters en mode ssh), plutôt que d'ouvrir une connexion dédiée par écriture. Renvoie `(nil, false)` si aucun collector n'est actif pour ce cluster — le handler appelant doit alors répondre une erreur claire, jamais échouer en silence.
 - **`internal/k8sops`** contient la logique K8s pure des actions d'écriture (aujourd'hui : `ScaleWorkload`, `RestartWorkload`), séparée du handler et du package `collector` (lecture seule). Prend un `kubernetes.Interface`, testable avec `k8s.io/client-go/kubernetes/fake` sans cluster réel.
 - **`handlers.RecordAction`** (`api/handlers/action_logs.go`) : chaque endpoint d'écriture l'appelle une fois après sa mutation, avec `models.ActionLogStatusSuccess`/`Failure`. Le rôle reste `middleware.RequireRole` au routeur — pas de nouvelle mécanique RBAC, pas de wrapper/décorateur (ce codebase n'en a aucun, les handlers appellent leurs helpers explicitement).
-- **Les workloads (`Deployment`/`StatefulSet`/`DaemonSet`) ne sont PAS surveillés en temps réel** — contrairement aux namespaces/nœuds/secrets (qui ont un vrai `Watch`, `collector/kubernetes.go`), `collectWorkloads` n'est qu'un `List` relancé toutes les 60s par le ticker de `runPeriodicCollection`. Après un `Patch` (scale/restart), la DB ne reflète donc le changement qu'à la prochaine passe périodique — sauf si on déclenche `ClusterOps.TriggerSync(clusterID)` juste après (même mécanisme que `POST /clusters/:id/sync`), ce que `ScaleWorkload`/`RestartWorkload` font désormais. Toujours penser à ça pour toute future action d'écriture sur un workload : sans ce trigger, le frontend peut refetch avant que la DB soit à jour.
-- **RBAC in-cluster** (`kubepilot-gitops`) : `update`/`patch` sur `deployments`/`daemonsets`/`statefulsets` uniquement (pas `replicasets`, jamais touché directement). Le rôle `-integration` (token pour une instance distante) reste volontairement lecture seule.
+- **Les workloads (`Deployment`/`StatefulSet`/`DaemonSet`) ET les Helm releases ne sont PAS surveillés en temps réel** — contrairement aux namespaces/nœuds/secrets (qui ont un vrai `Watch`, `collector/kubernetes.go`), `collectWorkloads` et `collectHelmReleases` ne sont que des `List` relancés toutes les 60s par le ticker de `runPeriodicCollection`. Après une mutation (scale/restart/helm upgrade/rollback), la DB ne reflète donc le changement qu'à la prochaine passe périodique — sauf à déclencher `ClusterOps.TriggerSync(clusterID)` juste après (même mécanisme que `POST /clusters/:id/sync`), ce que tous les handlers d'écriture font désormais. Toujours penser à ça pour toute future action d'écriture : sans ce trigger, le frontend peut refetch avant que la DB soit à jour.
+- **RBAC in-cluster** (`kubepilot-gitops`) : `update`/`patch` sur `deployments`/`daemonsets`/`statefulsets` uniquement pour scale/restart (pas `replicasets`, jamais touché directement). Le rôle `-integration` (token pour une instance distante) reste volontairement lecture seule.
+- **`CollectorManager.GetRESTConfig(clusterID)`** — miroir de `GetClientset` mais renvoie le `*rest.Config` brut (même tunnel SSH). Nécessaire pour tout ce qui a besoin de plus que le clientset typé (discovery client, RESTMapper) — c'est le cas du SDK Helm.
+- **`internal/helmops`** — Helm upgrade/rollback via le SDK `helm.sh/helm/v3` (v3.14.4, choisi pour son pin `k8s.io/*` en v0.29.0, proche de nos v0.29.3). `restClientGetter` custom enveloppant un `*rest.Config` déjà construit (pattern standard pour brancher le SDK sans fichier kubeconfig). Résolution + téléchargement de chart **volontairement dupliqués** depuis `internal/watcher` (pas de cache nécessaire, déclenché par l'utilisateur) plutôt que de coupler les deux packages.
+- **RBAC Helm = `cluster-admin`** (`kubepilot-gitops`, flag `rbac.helmAdmin`) — décision assumée : un chart peut toucher n'importe quelle ressource (CRD comprises), aucune liste de règles n'est fiable. Point sensible pour tout futur audit sécurité de ce déploiement.
 
 ### MCP (Model Context Protocol)
 - Sous-commande `kubepilot mcp` = serveur MCP JSON-RPC 2.0 sur stdio (`internal/mcp`), stdlib uniquement.

@@ -77,15 +77,17 @@ const (
 
 // Action log action
 const (
-	ActionLogCreate        = "create"
-	ActionLogUpdate        = "update"
-	ActionLogDelete        = "delete"
-	ActionLogUpdateStatus  = "update_status"
-	ActionLogResolve       = "resolve"
-	ActionLogIgnore        = "ignore"
-	ActionLogSync          = "sync"
-	ActionLogScale         = "scale"
-	ActionLogRestart       = "restart"
+	ActionLogCreate       = "create"
+	ActionLogUpdate       = "update"
+	ActionLogDelete       = "delete"
+	ActionLogUpdateStatus = "update_status"
+	ActionLogResolve      = "resolve"
+	ActionLogIgnore       = "ignore"
+	ActionLogSync         = "sync"
+	ActionLogScale        = "scale"
+	ActionLogRestart      = "restart"
+	ActionLogHelmUpgrade  = "helm_upgrade"
+	ActionLogHelmRollback = "helm_rollback"
 )
 
 // Action log outcome
@@ -103,11 +105,11 @@ const (
 
 // Secret types
 const (
-	SecretTypeOpaque                  = "Opaque"
-	SecretTypeTLS                     = "kubernetes.io/tls"
-	SecretTypeDockerConfigJSON        = "kubernetes.io/dockerconfigjson"
-	SecretTypeServiceAccountToken     = "kubernetes.io/service-account-token"
-	SecretTypeBasicAuth               = "kubernetes.io/basic-auth"
+	SecretTypeOpaque              = "Opaque"
+	SecretTypeTLS                 = "kubernetes.io/tls"
+	SecretTypeDockerConfigJSON    = "kubernetes.io/dockerconfigjson"
+	SecretTypeServiceAccountToken = "kubernetes.io/service-account-token"
+	SecretTypeBasicAuth           = "kubernetes.io/basic-auth"
 )
 
 // ---------------------------------------------------------------------------
@@ -127,19 +129,19 @@ type Environment struct {
 
 // Cluster represents a Kubernetes cluster registered in KubePilot.
 type Cluster struct {
-	ID              uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
-	EnvironmentID   *uuid.UUID     `gorm:"type:uuid;index"                                json:"environment_id,omitempty"`
-	Environment     *Environment   `gorm:"foreignKey:EnvironmentID"                       json:"environment,omitempty"`
-	Name            string         `gorm:"uniqueIndex;not null"                           json:"name"`
-	Slug            string         `gorm:"uniqueIndex;not null"                           json:"slug"`
-	Provider        string         `gorm:"default:'unknown'"                              json:"provider"`
-	Region          string         `                                                      json:"region"`
-	K8sVersion      string         `                                                      json:"k8s_version"`
-	Status          string         `gorm:"default:'unknown'"                              json:"status"`
-	LastSeenAt      *time.Time     `                                                      json:"last_seen_at,omitempty"`
-	KubeconfigRef   string         `gorm:"column:kubeconfig_ref"                          json:"kubeconfig_ref,omitempty"`
-	APIEndpoint     string         `                                                      json:"api_endpoint,omitempty"`
-	TLSInsecure     bool           `gorm:"default:false"                                  json:"tls_insecure"`
+	ID            uuid.UUID    `gorm:"type:uuid;primaryKey" json:"id"`
+	EnvironmentID *uuid.UUID   `gorm:"type:uuid;index"                                json:"environment_id,omitempty"`
+	Environment   *Environment `gorm:"foreignKey:EnvironmentID"                       json:"environment,omitempty"`
+	Name          string       `gorm:"uniqueIndex;not null"                           json:"name"`
+	Slug          string       `gorm:"uniqueIndex;not null"                           json:"slug"`
+	Provider      string       `gorm:"default:'unknown'"                              json:"provider"`
+	Region        string       `                                                      json:"region"`
+	K8sVersion    string       `                                                      json:"k8s_version"`
+	Status        string       `gorm:"default:'unknown'"                              json:"status"`
+	LastSeenAt    *time.Time   `                                                      json:"last_seen_at,omitempty"`
+	KubeconfigRef string       `gorm:"column:kubeconfig_ref"                          json:"kubeconfig_ref,omitempty"`
+	APIEndpoint   string       `                                                      json:"api_endpoint,omitempty"`
+	TLSInsecure   bool         `gorm:"default:false"                                  json:"tls_insecure"`
 	// Connection mode and SSH parameters. When ConnectionMode is "ssh", the collector
 	// opens an SSH session to SSHHost, reads the kubeconfig from the node, and tunnels
 	// all Kubernetes API traffic through that SSH connection. SSHPassword is never
@@ -151,10 +153,10 @@ type Cluster struct {
 	SSHPassword       string         `gorm:"column:ssh_password"                     json:"-"`
 	SSHKubeconfigPath string         `                                               json:"ssh_kubeconfig_path,omitempty"`
 	SSHSudo           bool           `gorm:"default:false"                           json:"ssh_sudo"`
-	Annotations     datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"annotations,omitempty"`
-	Labels          datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"labels,omitempty"`
-	CreatedAt       time.Time      `                                                      json:"created_at"`
-	UpdatedAt       time.Time      `                                                      json:"updated_at"`
+	Annotations       datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"annotations,omitempty"`
+	Labels            datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"labels,omitempty"`
+	CreatedAt         time.Time      `                                                      json:"created_at"`
+	UpdatedAt         time.Time      `                                                      json:"updated_at"`
 }
 
 // Namespace represents a Kubernetes namespace.
@@ -172,26 +174,26 @@ type Namespace struct {
 
 // Node represents a Kubernetes node.
 type Node struct {
-	ID             uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
-	ClusterID      uuid.UUID      `gorm:"type:uuid;not null;index;uniqueIndex:uq_node,priority:1" json:"cluster_id"`
-	Cluster        *Cluster       `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
-	Name           string         `gorm:"not null;uniqueIndex:uq_node,priority:2"         json:"name"`
-	Role           string         `gorm:"default:'worker'"                               json:"role"`
-	Status         string         `gorm:"default:'unknown'"                              json:"status"`
-	K8sVersion     string         `                                                      json:"k8s_version"`
-	OSImage        string         `                                                      json:"os_image"`
-	KernelVersion  string         `                                                      json:"kernel_version"`
-	ContainerRuntime string       `                                                      json:"container_runtime"`
-	Arch           string         `                                                      json:"arch"`
-	CapacityCPU    string         `                                                      json:"capacity_cpu"`
-	CapacityMemory string         `                                                      json:"capacity_memory"`
-	AllocatableCPU string         `                                                      json:"allocatable_cpu"`
-	AllocatableMemory string      `                                                      json:"allocatable_memory"`
-	Labels         datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"labels,omitempty"`
-	Taints         datatypes.JSON `gorm:"type:jsonb;default:'[]'"                        json:"taints,omitempty"`
-	Conditions     datatypes.JSON `gorm:"type:jsonb;default:'[]'"                        json:"conditions,omitempty"`
-	CreatedAt      time.Time      `                                                      json:"created_at"`
-	UpdatedAt      time.Time      `                                                      json:"updated_at"`
+	ID                uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
+	ClusterID         uuid.UUID      `gorm:"type:uuid;not null;index;uniqueIndex:uq_node,priority:1" json:"cluster_id"`
+	Cluster           *Cluster       `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
+	Name              string         `gorm:"not null;uniqueIndex:uq_node,priority:2"         json:"name"`
+	Role              string         `gorm:"default:'worker'"                               json:"role"`
+	Status            string         `gorm:"default:'unknown'"                              json:"status"`
+	K8sVersion        string         `                                                      json:"k8s_version"`
+	OSImage           string         `                                                      json:"os_image"`
+	KernelVersion     string         `                                                      json:"kernel_version"`
+	ContainerRuntime  string         `                                                      json:"container_runtime"`
+	Arch              string         `                                                      json:"arch"`
+	CapacityCPU       string         `                                                      json:"capacity_cpu"`
+	CapacityMemory    string         `                                                      json:"capacity_memory"`
+	AllocatableCPU    string         `                                                      json:"allocatable_cpu"`
+	AllocatableMemory string         `                                                      json:"allocatable_memory"`
+	Labels            datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"labels,omitempty"`
+	Taints            datatypes.JSON `gorm:"type:jsonb;default:'[]'"                        json:"taints,omitempty"`
+	Conditions        datatypes.JSON `gorm:"type:jsonb;default:'[]'"                        json:"conditions,omitempty"`
+	CreatedAt         time.Time      `                                                      json:"created_at"`
+	UpdatedAt         time.Time      `                                                      json:"updated_at"`
 }
 
 // NodeMetric is a point-in-time sample of a node's resource usage, collected from
@@ -240,32 +242,32 @@ type Workload struct {
 
 // WorkloadSource links a workload to its Helm release (if applicable).
 type WorkloadSource struct {
-	ID             uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
-	WorkloadID     uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex:idx_workload_source" json:"workload_id"`
-	Workload       *Workload  `gorm:"foreignKey:WorkloadID"                              json:"workload,omitempty"`
-	HelmReleaseID  *uuid.UUID `gorm:"type:uuid;index"                                    json:"helm_release_id,omitempty"`
-	HelmRelease    *HelmRelease `gorm:"foreignKey:HelmReleaseID"                         json:"helm_release,omitempty"`
-	SourceType     string     `gorm:"default:'unknown'"                                  json:"source_type"`
-	CreatedAt      time.Time  `                                                          json:"created_at"`
-	UpdatedAt      time.Time  `                                                          json:"updated_at"`
+	ID            uuid.UUID    `gorm:"type:uuid;primaryKey" json:"id"`
+	WorkloadID    uuid.UUID    `gorm:"type:uuid;not null;uniqueIndex:idx_workload_source" json:"workload_id"`
+	Workload      *Workload    `gorm:"foreignKey:WorkloadID"                              json:"workload,omitempty"`
+	HelmReleaseID *uuid.UUID   `gorm:"type:uuid;index"                                    json:"helm_release_id,omitempty"`
+	HelmRelease   *HelmRelease `gorm:"foreignKey:HelmReleaseID"                         json:"helm_release,omitempty"`
+	SourceType    string       `gorm:"default:'unknown'"                                  json:"source_type"`
+	CreatedAt     time.Time    `                                                          json:"created_at"`
+	UpdatedAt     time.Time    `                                                          json:"updated_at"`
 }
 
 // ContainerImage represents a container image used by a workload.
 type ContainerImage struct {
-	ID              uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
-	WorkloadID      uuid.UUID  `gorm:"type:uuid;not null;index;uniqueIndex:uq_container_image,priority:1" json:"workload_id"`
-	Workload        *Workload  `gorm:"foreignKey:WorkloadID"                          json:"workload,omitempty"`
-	ContainerName   string     `gorm:"not null;uniqueIndex:uq_container_image,priority:2" json:"container_name"`
-	Image           string     `gorm:"not null"                                       json:"image"`
-	Registry        string     `gorm:"not null"                                       json:"registry"`
-	Repository      string     `gorm:"not null"                                       json:"repository"`
-	Tag             string     `gorm:"not null"                                       json:"tag"`
-	Digest          string     `                                                      json:"digest,omitempty"`
-	IsInitContainer bool       `gorm:"default:false"                                  json:"is_init_container"`
-	RegistryID      *uuid.UUID `gorm:"type:uuid;index"                                json:"registry_id,omitempty"`
+	ID              uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
+	WorkloadID      uuid.UUID      `gorm:"type:uuid;not null;index;uniqueIndex:uq_container_image,priority:1" json:"workload_id"`
+	Workload        *Workload      `gorm:"foreignKey:WorkloadID"                          json:"workload,omitempty"`
+	ContainerName   string         `gorm:"not null;uniqueIndex:uq_container_image,priority:2" json:"container_name"`
+	Image           string         `gorm:"not null"                                       json:"image"`
+	Registry        string         `gorm:"not null"                                       json:"registry"`
+	Repository      string         `gorm:"not null"                                       json:"repository"`
+	Tag             string         `gorm:"not null"                                       json:"tag"`
+	Digest          string         `                                                      json:"digest,omitempty"`
+	IsInitContainer bool           `gorm:"default:false"                                  json:"is_init_container"`
+	RegistryID      *uuid.UUID     `gorm:"type:uuid;index"                                json:"registry_id,omitempty"`
 	ImageRegistry   *ImageRegistry `gorm:"foreignKey:RegistryID"                      json:"image_registry,omitempty"`
-	CreatedAt       time.Time  `                                                      json:"created_at"`
-	UpdatedAt       time.Time  `                                                      json:"updated_at"`
+	CreatedAt       time.Time      `                                                      json:"created_at"`
+	UpdatedAt       time.Time      `                                                      json:"updated_at"`
 }
 
 // ImageRegistry stores registry configuration and credentials.
@@ -299,30 +301,30 @@ type HelmRepository struct {
 
 // ImageTagObservation records a tag observed in a registry at a point in time.
 type ImageTagObservation struct {
-	ID          uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
-	ImageID     uuid.UUID  `gorm:"type:uuid;not null;index;uniqueIndex:uq_image_tag,priority:1" json:"image_id"`
+	ID          uuid.UUID       `gorm:"type:uuid;primaryKey" json:"id"`
+	ImageID     uuid.UUID       `gorm:"type:uuid;not null;index;uniqueIndex:uq_image_tag,priority:1" json:"image_id"`
 	Image       *ContainerImage `gorm:"foreignKey:ImageID"                        json:"image,omitempty"`
-	Tag         string     `gorm:"not null;uniqueIndex:uq_image_tag,priority:2"   json:"tag"`
-	Digest      string     `                                                      json:"digest,omitempty"`
-	PublishedAt *time.Time `                                                      json:"published_at,omitempty"`
-	ObservedAt  time.Time  `gorm:"not null"                                       json:"observed_at"`
-	IsLatest    bool       `gorm:"default:false"                                  json:"is_latest"`
+	Tag         string          `gorm:"not null;uniqueIndex:uq_image_tag,priority:2"   json:"tag"`
+	Digest      string          `                                                      json:"digest,omitempty"`
+	PublishedAt *time.Time      `                                                      json:"published_at,omitempty"`
+	ObservedAt  time.Time       `gorm:"not null"                                       json:"observed_at"`
+	IsLatest    bool            `gorm:"default:false"                                  json:"is_latest"`
 }
 
 // Secret represents a Kubernetes Secret (metadata only — values are never stored).
 type Secret struct {
-	ID             uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
-	ClusterID      uuid.UUID      `gorm:"type:uuid;not null;index;uniqueIndex:uq_secret,priority:1" json:"cluster_id"`
-	Cluster        *Cluster       `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
-	NamespaceName  string         `gorm:"not null;index;uniqueIndex:uq_secret,priority:2" json:"namespace_name"`
-	Name           string         `gorm:"not null;uniqueIndex:uq_secret,priority:3"       json:"name"`
-	Type           string         `gorm:"not null;default:'Opaque'"                      json:"type"`
-	Keys           datatypes.JSON `gorm:"type:jsonb;default:'[]'"                        json:"keys"`
-	K8sCreatedAt   *time.Time     `                                                      json:"k8s_created_at,omitempty"`
-	K8sUpdatedAt   *time.Time     `                                                      json:"k8s_updated_at,omitempty"`
-	LastSeenAt     time.Time      `                                                      json:"last_seen_at"`
-	CreatedAt      time.Time      `                                                      json:"created_at"`
-	UpdatedAt      time.Time      `                                                      json:"updated_at"`
+	ID            uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
+	ClusterID     uuid.UUID      `gorm:"type:uuid;not null;index;uniqueIndex:uq_secret,priority:1" json:"cluster_id"`
+	Cluster       *Cluster       `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
+	NamespaceName string         `gorm:"not null;index;uniqueIndex:uq_secret,priority:2" json:"namespace_name"`
+	Name          string         `gorm:"not null;uniqueIndex:uq_secret,priority:3"       json:"name"`
+	Type          string         `gorm:"not null;default:'Opaque'"                      json:"type"`
+	Keys          datatypes.JSON `gorm:"type:jsonb;default:'[]'"                        json:"keys"`
+	K8sCreatedAt  *time.Time     `                                                      json:"k8s_created_at,omitempty"`
+	K8sUpdatedAt  *time.Time     `                                                      json:"k8s_updated_at,omitempty"`
+	LastSeenAt    time.Time      `                                                      json:"last_seen_at"`
+	CreatedAt     time.Time      `                                                      json:"created_at"`
+	UpdatedAt     time.Time      `                                                      json:"updated_at"`
 }
 
 // HelmRelease represents a Helm release deployed in a cluster.
@@ -347,29 +349,29 @@ type HelmRelease struct {
 
 // UpdateFinding represents a detected update opportunity or security finding.
 type UpdateFinding struct {
-	ID                uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
+	ID uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	// ClusterID participates in two composite unique indexes:
 	//   uq_finding_by_image  (cluster_id, container_image_id) — one finding per container image per cluster
 	//   uq_finding_by_helm   (cluster_id, helm_release_id)    — one finding per Helm release per cluster
 	// PostgreSQL NULL semantics (NULL != NULL) allow multiple findings with null container_image_id or null helm_release_id.
-	ClusterID         uuid.UUID      `gorm:"type:uuid;not null;index;uniqueIndex:uq_finding_by_image,priority:1;uniqueIndex:uq_finding_by_helm,priority:1" json:"cluster_id"`
-	Cluster           *Cluster       `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
-	NamespaceName     string         `gorm:"index"                                          json:"namespace_name,omitempty"`
-	WorkloadID        *uuid.UUID     `gorm:"type:uuid;index"                                json:"workload_id,omitempty"`
-	Workload          *Workload      `gorm:"foreignKey:WorkloadID"                          json:"workload,omitempty"`
-	HelmReleaseID     *uuid.UUID     `gorm:"type:uuid;uniqueIndex:uq_finding_by_helm,priority:2" json:"helm_release_id,omitempty"`
-	HelmRelease       *HelmRelease   `gorm:"foreignKey:HelmReleaseID"                       json:"helm_release,omitempty"`
-	ContainerImageID  *uuid.UUID     `gorm:"type:uuid;uniqueIndex:uq_finding_by_image,priority:2" json:"container_image_id,omitempty"`
-	ContainerImage    *ContainerImage `gorm:"foreignKey:ContainerImageID"                   json:"container_image,omitempty"`
-	Kind              string         `gorm:"not null;index"                                 json:"kind"`
-	UpdateType        string         `gorm:"not null"                                       json:"update_type"`
-	Severity          string         `gorm:"not null;index"                                 json:"severity"`
-	Status            string         `gorm:"not null;default:'open';index"                  json:"status"`
-	CurrentVersion    string         `gorm:"not null"                                       json:"current_version"`
-	LatestVersion     string         `gorm:"not null"                                       json:"latest_version"`
-	Title             string         `gorm:"not null"                                       json:"title"`
-	Description       string         `                                                      json:"description,omitempty"`
-	ReleaseNotes      string         `                                                      json:"release_notes,omitempty"`
+	ClusterID        uuid.UUID       `gorm:"type:uuid;not null;index;uniqueIndex:uq_finding_by_image,priority:1;uniqueIndex:uq_finding_by_helm,priority:1" json:"cluster_id"`
+	Cluster          *Cluster        `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
+	NamespaceName    string          `gorm:"index"                                          json:"namespace_name,omitempty"`
+	WorkloadID       *uuid.UUID      `gorm:"type:uuid;index"                                json:"workload_id,omitempty"`
+	Workload         *Workload       `gorm:"foreignKey:WorkloadID"                          json:"workload,omitempty"`
+	HelmReleaseID    *uuid.UUID      `gorm:"type:uuid;uniqueIndex:uq_finding_by_helm,priority:2" json:"helm_release_id,omitempty"`
+	HelmRelease      *HelmRelease    `gorm:"foreignKey:HelmReleaseID"                       json:"helm_release,omitempty"`
+	ContainerImageID *uuid.UUID      `gorm:"type:uuid;uniqueIndex:uq_finding_by_image,priority:2" json:"container_image_id,omitempty"`
+	ContainerImage   *ContainerImage `gorm:"foreignKey:ContainerImageID"                   json:"container_image,omitempty"`
+	Kind             string          `gorm:"not null;index"                                 json:"kind"`
+	UpdateType       string          `gorm:"not null"                                       json:"update_type"`
+	Severity         string          `gorm:"not null;index"                                 json:"severity"`
+	Status           string          `gorm:"not null;default:'open';index"                  json:"status"`
+	CurrentVersion   string          `gorm:"not null"                                       json:"current_version"`
+	LatestVersion    string          `gorm:"not null"                                       json:"latest_version"`
+	Title            string          `gorm:"not null"                                       json:"title"`
+	Description      string          `                                                      json:"description,omitempty"`
+	ReleaseNotes     string          `                                                      json:"release_notes,omitempty"`
 	// column:cves is explicit — GORM's naming strategy maps the CVEs field to
 	// "cv_es", which breaks UpsertFinding's ON CONFLICT list and diverges from
 	// migrations/001_initial.sql (PostgreSQL), where the column is "cves".
@@ -388,17 +390,17 @@ type UpdateFinding struct {
 
 // RiskScore holds the computed risk score for an UpdateFinding.
 type RiskScore struct {
-	ID           uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
-	FindingID    uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex"                 json:"finding_id"`
-	Finding      *UpdateFinding `gorm:"foreignKey:FindingID"                           json:"finding,omitempty"`
-	Score        float64        `gorm:"not null"                                       json:"score"`
-	Severity     string         `gorm:"not null"                                       json:"severity"`
-	Factors      datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"factors"`
-	EnvMultiplier float64       `gorm:"default:1.0"                                    json:"env_multiplier"`
-	ExposureMultiplier float64  `gorm:"default:1.0"                                    json:"exposure_multiplier"`
-	ComputedAt   time.Time      `gorm:"not null"                                       json:"computed_at"`
-	CreatedAt    time.Time      `                                                      json:"created_at"`
-	UpdatedAt    time.Time      `                                                      json:"updated_at"`
+	ID                 uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
+	FindingID          uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex"                 json:"finding_id"`
+	Finding            *UpdateFinding `gorm:"foreignKey:FindingID"                           json:"finding,omitempty"`
+	Score              float64        `gorm:"not null"                                       json:"score"`
+	Severity           string         `gorm:"not null"                                       json:"severity"`
+	Factors            datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"factors"`
+	EnvMultiplier      float64        `gorm:"default:1.0"                                    json:"env_multiplier"`
+	ExposureMultiplier float64        `gorm:"default:1.0"                                    json:"exposure_multiplier"`
+	ComputedAt         time.Time      `gorm:"not null"                                       json:"computed_at"`
+	CreatedAt          time.Time      `                                                      json:"created_at"`
+	UpdatedAt          time.Time      `                                                      json:"updated_at"`
 }
 
 // Ownership maps workloads to owning teams or persons.
@@ -416,16 +418,16 @@ type Ownership struct {
 
 // MaintenanceWindow defines when updates/operations are permitted.
 type MaintenanceWindow struct {
-	ID          uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
-	ClusterID   *uuid.UUID `gorm:"type:uuid;index"                                json:"cluster_id,omitempty"`
-	Cluster     *Cluster   `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
-	Name        string     `gorm:"not null"                                       json:"name"`
-	CronExpr    string     `gorm:"not null"                                       json:"cron_expr"`
-	Duration    int        `gorm:"not null;default:60"                            json:"duration_minutes"`
-	Timezone    string     `gorm:"default:'UTC'"                                  json:"timezone"`
-	IsActive    bool       `gorm:"default:true"                                   json:"is_active"`
-	CreatedAt   time.Time  `                                                      json:"created_at"`
-	UpdatedAt   time.Time  `                                                      json:"updated_at"`
+	ID        uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	ClusterID *uuid.UUID `gorm:"type:uuid;index"                                json:"cluster_id,omitempty"`
+	Cluster   *Cluster   `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
+	Name      string     `gorm:"not null"                                       json:"name"`
+	CronExpr  string     `gorm:"not null"                                       json:"cron_expr"`
+	Duration  int        `gorm:"not null;default:60"                            json:"duration_minutes"`
+	Timezone  string     `gorm:"default:'UTC'"                                  json:"timezone"`
+	IsActive  bool       `gorm:"default:true"                                   json:"is_active"`
+	CreatedAt time.Time  `                                                      json:"created_at"`
+	UpdatedAt time.Time  `                                                      json:"updated_at"`
 }
 
 // ActionLog records user actions and system events.
@@ -445,33 +447,33 @@ type ActionLog struct {
 
 // ExceptionRule suppresses a finding for a given scope.
 type ExceptionRule struct {
-	ID            uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
-	ClusterID     *uuid.UUID     `gorm:"type:uuid;index"                                json:"cluster_id,omitempty"`
-	Cluster       *Cluster       `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
-	WorkloadID    *uuid.UUID     `gorm:"type:uuid;index"                                json:"workload_id,omitempty"`
-	Workload      *Workload      `gorm:"foreignKey:WorkloadID"                          json:"workload,omitempty"`
-	FindingKind   string         `                                                      json:"finding_kind,omitempty"`
-	ImagePattern  string         `                                                      json:"image_pattern,omitempty"`
-	Reason        string         `gorm:"not null"                                       json:"reason"`
-	ExpiresAt     *time.Time     `                                                      json:"expires_at,omitempty"`
-	CreatedByID   *uuid.UUID     `gorm:"type:uuid"                                      json:"created_by_id,omitempty"`
-	Metadata      datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"metadata,omitempty"`
-	IsActive      bool           `gorm:"default:true"                                   json:"is_active"`
-	CreatedAt     time.Time      `                                                      json:"created_at"`
-	UpdatedAt     time.Time      `                                                      json:"updated_at"`
+	ID           uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
+	ClusterID    *uuid.UUID     `gorm:"type:uuid;index"                                json:"cluster_id,omitempty"`
+	Cluster      *Cluster       `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
+	WorkloadID   *uuid.UUID     `gorm:"type:uuid;index"                                json:"workload_id,omitempty"`
+	Workload     *Workload      `gorm:"foreignKey:WorkloadID"                          json:"workload,omitempty"`
+	FindingKind  string         `                                                      json:"finding_kind,omitempty"`
+	ImagePattern string         `                                                      json:"image_pattern,omitempty"`
+	Reason       string         `gorm:"not null"                                       json:"reason"`
+	ExpiresAt    *time.Time     `                                                      json:"expires_at,omitempty"`
+	CreatedByID  *uuid.UUID     `gorm:"type:uuid"                                      json:"created_by_id,omitempty"`
+	Metadata     datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"metadata,omitempty"`
+	IsActive     bool           `gorm:"default:true"                                   json:"is_active"`
+	CreatedAt    time.Time      `                                                      json:"created_at"`
+	UpdatedAt    time.Time      `                                                      json:"updated_at"`
 }
 
 // IntegrationAccount stores configuration for external integrations.
 type IntegrationAccount struct {
-	ID          uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
-	Name        string         `gorm:"uniqueIndex;not null"                           json:"name"`
-	Type        string         `gorm:"not null"                                       json:"type"`
-	Config      datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"config,omitempty"`
-	SecretRef   string         `                                                      json:"secret_ref,omitempty"`
-	IsEnabled   bool           `gorm:"default:true"                                   json:"is_enabled"`
-	LastSyncAt  *time.Time     `                                                      json:"last_sync_at,omitempty"`
-	CreatedAt   time.Time      `                                                      json:"created_at"`
-	UpdatedAt   time.Time      `                                                      json:"updated_at"`
+	ID         uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
+	Name       string         `gorm:"uniqueIndex;not null"                           json:"name"`
+	Type       string         `gorm:"not null"                                       json:"type"`
+	Config     datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"config,omitempty"`
+	SecretRef  string         `                                                      json:"secret_ref,omitempty"`
+	IsEnabled  bool           `gorm:"default:true"                                   json:"is_enabled"`
+	LastSyncAt *time.Time     `                                                      json:"last_sync_at,omitempty"`
+	CreatedAt  time.Time      `                                                      json:"created_at"`
+	UpdatedAt  time.Time      `                                                      json:"updated_at"`
 }
 
 // User represents an authenticated KubePilot user.
