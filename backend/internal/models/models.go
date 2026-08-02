@@ -141,9 +141,12 @@ type Cluster struct {
 	K8sVersion    string       `                                                      json:"k8s_version"`
 	Status        string       `gorm:"default:'unknown'"                              json:"status"`
 	LastSeenAt    *time.Time   `                                                      json:"last_seen_at,omitempty"`
-	KubeconfigRef string       `gorm:"column:kubeconfig_ref"                          json:"kubeconfig_ref,omitempty"`
-	APIEndpoint   string       `                                                      json:"api_endpoint,omitempty"`
-	TLSInsecure   bool         `gorm:"default:false"                                  json:"tls_insecure"`
+	// KubeconfigRef holds the full kubeconfig content (not just a reference,
+	// despite the name), including client-certificate private key data —
+	// never serialised back over the API, same as SSHPassword below.
+	KubeconfigRef string `gorm:"column:kubeconfig_ref"                          json:"-"`
+	APIEndpoint   string `                                                      json:"api_endpoint,omitempty"`
+	TLSInsecure   bool   `gorm:"default:false"                                  json:"tls_insecure"`
 	// Connection mode and SSH parameters. When ConnectionMode is "ssh", the collector
 	// opens an SSH session to SSHHost, reads the kubeconfig from the node, and tunnels
 	// all Kubernetes API traffic through that SSH connection. SSHPassword is never
