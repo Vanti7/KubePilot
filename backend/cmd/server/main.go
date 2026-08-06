@@ -26,7 +26,7 @@ import (
 )
 
 // version is the server build version, surfaced over MCP serverInfo.
-const version = "0.2.0-alpha.1"
+const version = "0.2.0-alpha.8"
 
 func main() {
 	// Subcommand dispatch. With no argument the HTTP server runs (the default
@@ -48,6 +48,12 @@ func runServer() {
 		os.Exit(1)
 	}
 	defer logger.Sync() //nolint:errcheck
+
+	if cfg.JWTSecretGenerated {
+		logger.Warn("JWT_SECRET not set — generated a random secret for this process only; " +
+			"all sessions will be invalidated on restart. Set JWT_SECRET explicitly for " +
+			"production or for persistent local sessions.")
+	}
 
 	db, err := openDatabase(cfg, logger)
 	if err != nil {

@@ -81,7 +81,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ## État actuel du projet
 
-**Version courante** : `v0.2.0-alpha.7` (2026-08-02)
+**Version courante** : `v0.2.0-alpha.8` (2026-08-06)
 **Canal** : alpha
 **Branche principale** : `main`
 
@@ -186,6 +186,17 @@ Utiliser `gorm.io/datatypes.JSON` côté Go, `Record<string, any>` côté TypeSc
 - Endpoint `/auth/setup` : actif uniquement quand `users` table est vide.
 - Rôles : `admin` > `operator` > `viewer`.
 - **Pas d'OIDC en MVP** — prévu en V2 via Dex.
+- **`JWT_SECRET` sans valeur codée en dur** : si la variable d'env est absente, un secret aléatoire de 32 octets est généré à chaque démarrage (`config.generateRandomSecret`, `crypto/rand`) — un défaut fixe (`"change-me-in-production"`) aurait permis de forger un token admin contre n'importe quelle instance non configurée. Effet de bord assumé et loggé (`logger.Warn` au boot) : les sessions ne survivent pas à un redémarrage tant que `JWT_SECRET` n'est pas fixé explicitement.
+- **`JWTAuth` revalide `role`/`is_active` en base à chaque requête** (`store.ActiveUserRole`, interface `middleware.ActiveUserRole`) — les claims du JWT ne sont plus la source de vérité pour le rôle. Sans ça, désactiver ou rétrograder un compte via `PATCH /auth/users/:id` n'aurait aucun effet avant l'expiration naturelle du token (jusqu'à 24h). Coût : un lookup DB par requête authentifiée, jugé acceptable à l'échelle homelab visée.
+
+### SSRF — requêtes sortantes non authentifiées (depuis Unreleased)
+- **`internal/netguard`** : client HTTP partagé pour toute requête sortante construite depuis une donnée que KubePilot ne contrôle pas totalement — registre/repository lu dans une spec de workload (`watcher/image.go`), URL de dépôt renvoyée par la recherche Artifact Hub (`watcher/helm_resolve.go`), URL de dépôt Helm saisie par un opérateur (`handlers/helm_repositories.go`, exposition moindre). Les deux premiers tournent sur une boucle temporisée **sans utilisateur authentifié dans la chaîne** — le point d'entrée SSRF n'a besoin d'aucune session KubePilot.
+- Le dialer (`net.Dialer.Control`) refuse loopback/link-local/multicast **après résolution DNS**, sur l'IP réellement composée — résiste au DNS rebinding qu'un simple filtre sur le hostname ne bloquerait pas. Ça couvre `169.254.169.254` (métadonnées cloud AWS/GCP/Azure/OCI).
+- **RFC1918 (`10/8`, `172.16/12`, `192.168/16`) reste volontairement autorisé** : les registries/dépôts de charts auto-hébergés sur un réseau privé sont l'usage principal de l'outil (Harbor à `10.0.60.152`), pas un cas à bloquer. Toute nouvelle requête sortante construite depuis une donnée externe doit passer par `netguard.NewHTTPClient`, jamais un `http.Client{}` nu.
+
+### Exposition de secrets via l'API (depuis Unreleased)
+- **`Values` d'une Helm release** (`GET /helm`, `GET /helm/:id`) : masquées (`nil`) pour tout rôle sous `operator` — elles contiennent couramment des mots de passe/clés d'API, et seul `operator`/`admin` peut de toute façon déclencher un upgrade qui en aurait l'usage.
+- **`url` d'une intégration** (`GET /integrations`) : retirée de la réponse pour tous les rôles, remplacée par `has_url: bool` — pour Slack/PagerDuty/Teams, cette URL **est** le jeton d'authentification, pas un simple identifiant (même traitement que les identifiants de dépôt Helm : jamais renvoyés, seulement `has_credentials`).
 
 ### Scoring
 Score = Σ(facteur × poids) × env_multiplier × exposure_multiplier, cap à 100.

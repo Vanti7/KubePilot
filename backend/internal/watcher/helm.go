@@ -2,7 +2,6 @@ package watcher
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/google/uuid"
 	"github.com/kubepilot/backend/internal/models"
+	"github.com/kubepilot/backend/internal/netguard"
 	"github.com/kubepilot/backend/internal/store"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
@@ -41,20 +41,19 @@ type HelmWatcher struct {
 func NewHelmWatcher(s *store.Store, logger *zap.Logger, autodiscover bool) *HelmWatcher {
 	return &HelmWatcher{
 		store: s,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		// repoURL comes either from an operator-entered Helm repository or from
+		// Artifact Hub search results (resolveRepoURL / discoverViaArtifactHub in
+		// helm_resolve.go) — the latter is not data KubePilot controls, and this
+		// whole watcher runs on a timer with no authenticated user in the loop —
+		// so both clients dial through netguard to refuse loopback/link-local/
+		// metadata addresses.
+		httpClient: netguard.NewHTTPClient(30*time.Second, false),
 		// Used only for repositories explicitly marked tls_insecure (self-hosted
 		// ChartMuseum & co); never used for public repositories.
-		insecureClient: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		},
-		autodiscover: autodiscover,
-		logger:       logger,
-		stopCh:       make(chan struct{}),
+		insecureClient: netguard.NewHTTPClient(30*time.Second, true),
+		autodiscover:   autodiscover,
+		logger:         logger,
+		stopCh:         make(chan struct{}),
 	}
 }
 
@@ -158,14 +157,14 @@ func (hw *HelmWatcher) CheckRelease(ctx context.Context, release *models.HelmRel
 		release.ChartName, release.ChartVersion, latestVersion)
 
 	finding := &models.UpdateFinding{
-		ID:            uuid.New(),
-		ClusterID:     release.ClusterID,
-		NamespaceName: release.NamespaceName,
-		HelmReleaseID: &release.ID,
-		Kind:          models.FindingKindHelm,
-		UpdateType:    updateType,
-		Severity:      updateTypeSeverity(updateType),
-		Status:        models.FindingStatusOpen,
+		ID:             uuid.New(),
+		ClusterID:      release.ClusterID,
+		NamespaceName:  release.NamespaceName,
+		HelmReleaseID:  &release.ID,
+		Kind:           models.FindingKindHelm,
+		UpdateType:     updateType,
+		Severity:       updateTypeSeverity(updateType),
+		Status:         models.FindingStatusOpen,
 		CurrentVersion: release.ChartVersion,
 		LatestVersion:  latestVersion,
 		Title:          title,

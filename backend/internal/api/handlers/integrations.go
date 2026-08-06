@@ -24,7 +24,10 @@ func NewIntegrationHandler(s *store.Store, logger *zap.Logger) *IntegrationHandl
 	return &IntegrationHandler{store: s, logger: logger}
 }
 
-// integrationDTO is the response shape expected by the frontend.
+// integrationDTO is the response shape expected by the frontend. The webhook
+// URL itself (Slack/PagerDuty/Teams...) is the bearer credential for that
+// integration, not just a locator — like helmRepositoryDTO's credentials, it
+// is never returned over the API, only whether one is configured.
 type integrationDTO struct {
 	ID              string     `json:"id"`
 	Name            string     `json:"name"`
@@ -32,7 +35,7 @@ type integrationDTO struct {
 	Enabled         bool       `json:"enabled"`
 	LastTestedAt    *time.Time `json:"last_tested_at,omitempty"`
 	LastTestStatus  string     `json:"last_test_status"`
-	URL             string     `json:"url,omitempty"`
+	HasURL          bool       `json:"has_url"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
@@ -57,7 +60,7 @@ func integrationToDTO(a models.IntegrationAccount) integrationDTO {
 		Enabled:         a.IsEnabled,
 		LastTestedAt:    a.LastSyncAt,
 		LastTestStatus:  status,
-		URL:             url,
+		HasURL:          url != "",
 		CreatedAt:       a.CreatedAt,
 		UpdatedAt:       a.UpdatedAt,
 	}

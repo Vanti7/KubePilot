@@ -1,12 +1,22 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// ActiveUserRole resolves the live role and active flag for a user ID.
+// JWTAuth calls it on every request so a role change or deactivation made via
+// PATCH /auth/users/:id takes effect immediately, instead of only once the
+// presented token's claims — signed at login time — naturally expire (up to
+// 24h later). *store.Store satisfies this implicitly (store/users.go).
+type ActiveUserRole interface {
+	ActiveUserRole(ctx context.Context, userID string) (role string, active bool, err error)
+}
 
 // Claims holds the JWT payload fields KubePilot uses.
 type Claims struct {
@@ -27,8 +37,9 @@ const ContextKeyRole = "user_role"
 
 // JWTAuth returns a Gin middleware that validates Bearer JWT tokens.
 // Accepts the token via Authorization header (preferred) or ?token= query param
-// (required for EventSource which cannot send custom headers).
-func JWTAuth(secret string) gin.HandlerFunc {
+// (required for EventSource which cannot send custom headers). users resolves
+// the live role/active state, checked on every request (see ActiveUserRole).
+func JWTAuth(secret string, users ActiveUserRole) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var tokenStr string
 
@@ -60,9 +71,17 @@ func JWTAuth(secret string) gin.HandlerFunc {
 			return
 		}
 
+		role, active, err := users.ActiveUserRole(c.Request.Context(), claims.UserID)
+		if err != nil || !active {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
+			return
+		}
+
 		c.Set(ContextKeyUserID, claims.UserID)
 		c.Set(ContextKeyEmail, claims.Email)
-		c.Set(ContextKeyRole, claims.Role)
+		// The live DB role, not claims.Role — a role change must apply
+		// immediately, not only once this token's claims naturally expire.
+		c.Set(ContextKeyRole, role)
 		c.Next()
 	}
 }

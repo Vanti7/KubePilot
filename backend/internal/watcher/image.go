@@ -2,7 +2,6 @@ package watcher
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kubepilot/backend/internal/models"
+	"github.com/kubepilot/backend/internal/netguard"
 	"github.com/kubepilot/backend/internal/store"
 	"go.uber.org/zap"
 )
@@ -31,19 +31,16 @@ type ImageWatcher struct {
 func NewImageWatcher(s *store.Store, logger *zap.Logger) *ImageWatcher {
 	return &ImageWatcher{
 		store: s,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		// Registry hosts come from image references seen in workload specs —
+		// not data KubePilot controls, and this runs on a timer with no
+		// authenticated user in the loop — so both clients dial through
+		// netguard to refuse loopback/link-local/metadata addresses.
+		httpClient: netguard.NewHTTPClient(30*time.Second, false),
 		// Used only for registries explicitly marked tls_insecure (self-signed
 		// Harbor & co); never used for public registries.
-		insecureClient: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		},
-		logger: logger,
-		stopCh: make(chan struct{}),
+		insecureClient: netguard.NewHTTPClient(30*time.Second, true),
+		logger:         logger,
+		stopCh:         make(chan struct{}),
 	}
 }
 
@@ -134,7 +131,7 @@ func isExpectedImageError(err error) bool {
 		"i/o timeout",
 		"deadline exceeded",
 		"connectex:", // windows connect failure
-		"wsarecv",     // windows connection aborted
+		"wsarecv",    // windows connection aborted
 	} {
 		if strings.Contains(msg, s) {
 			return true
@@ -339,4 +336,3 @@ func (iw *ImageWatcher) cacheTags(ctx context.Context, key string, tags []string
 	}
 	_ = iw.store.Cache.Set(ctx, key, data, imageTagCacheTTL)
 }
-

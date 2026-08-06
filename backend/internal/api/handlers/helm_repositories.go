@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -10,10 +9,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kubepilot/backend/internal/models"
+	"github.com/kubepilot/backend/internal/netguard"
 	"github.com/kubepilot/backend/internal/store"
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 	"gopkg.in/yaml.v3"
+	"gorm.io/gorm"
 )
 
 // HelmRepositoryHandler handles chart repository configuration endpoints.
@@ -197,11 +197,11 @@ func (h *HelmRepositoryHandler) TestHelmRepository(c *gin.Context) {
 }
 
 // probeHelmRepository downloads index.yaml and counts the charts it lists.
+// The URL is operator-supplied, not attacker-controlled, but it dials through
+// netguard anyway (defense in depth against pivoting to loopback/link-local/
+// metadata addresses from the pod).
 func probeHelmRepository(ctx context.Context, r models.HelmRepository) (int, string, bool) {
-	client := &http.Client{Timeout: 20 * time.Second}
-	if r.TLSInsecure {
-		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	}
+	client := netguard.NewHTTPClient(20*time.Second, r.TLSInsecure)
 
 	indexURL := strings.TrimRight(r.URL, "/") + "/index.yaml"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, indexURL, nil)

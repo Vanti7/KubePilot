@@ -61,7 +61,7 @@ func NewRouter(
 		authGroup.POST("/setup", authH.Setup)
 
 		authProtected := authGroup.Group("")
-		authProtected.Use(middleware.JWTAuth(cfg.JWTSecret))
+		authProtected.Use(middleware.JWTAuth(cfg.JWTSecret, s))
 		{
 			authProtected.POST("/refresh", authH.RefreshToken)
 			authProtected.GET("/me", authH.Me)
@@ -71,7 +71,7 @@ func NewRouter(
 			authProtected.DELETE("/users/:id", middleware.RequireRole("admin"), authH.DeleteUser)
 		}
 	}
-	v1.Use(middleware.JWTAuth(cfg.JWTSecret))
+	v1.Use(middleware.JWTAuth(cfg.JWTSecret, s))
 
 	// Clusters.
 	clusterH := handlers.NewClusterHandler(s, syncer, logger)

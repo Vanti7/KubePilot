@@ -6,12 +6,25 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kubepilot/backend/internal/api/middleware"
 	"github.com/kubepilot/backend/internal/helmops"
 	"github.com/kubepilot/backend/internal/models"
 	"github.com/kubepilot/backend/internal/store"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
+
+// hideValuesFromViewers blanks the Values payload for callers below operator
+// role. Helm values routinely carry secrets (DB passwords, API keys, tokens)
+// and a viewer has no legitimate use for them — upgrading is operator+ only.
+func hideValuesFromViewers(c *gin.Context, release *models.HelmRelease) {
+	role, _ := c.Get(middleware.ContextKeyRole)
+	roleStr, _ := role.(string)
+	if roleStr == models.RoleOperator || roleStr == models.RoleAdmin {
+		return
+	}
+	release.Values = nil
+}
 
 // HelmHandler handles Helm release endpoints.
 type HelmHandler struct {
@@ -51,6 +64,9 @@ func (h *HelmHandler) ListHelmReleases(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list helm releases"})
 		return
 	}
+	for i := range releases {
+		hideValuesFromViewers(c, &releases[i])
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"data":   releases,
@@ -76,6 +92,7 @@ func (h *HelmHandler) GetHelmRelease(c *gin.Context) {
 		return
 	}
 
+	hideValuesFromViewers(c, release)
 	c.JSON(http.StatusOK, release)
 }
 

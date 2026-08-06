@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"os"
 	"strconv"
 )
@@ -15,14 +17,18 @@ const (
 
 // Config holds all application configuration loaded from environment variables.
 type Config struct {
-	DatabaseURL     string
-	RedisURL        string
-	JWTSecret       string
-	Port            string
-	LogLevel        string
-	WorkerInterval  int
-	HeadlampURL     string
-	TLSInsecure     bool
+	DatabaseURL string
+	RedisURL    string
+	JWTSecret   string
+	// JWTSecretGenerated is true when JWT_SECRET was not set and a random
+	// secret was generated for this process only (see Load) — the caller
+	// should warn loudly once a logger is available.
+	JWTSecretGenerated bool
+	Port               string
+	LogLevel           string
+	WorkerInterval     int
+	HeadlampURL        string
+	TLSInsecure        bool
 
 	// Node metrics — collected from the kubelet Summary API on each collection pass.
 	// NodeMetricsEnabled toggles collection; NodeMetricsRetentionHours bounds how
@@ -114,36 +120,49 @@ func Load() *Config {
 		}
 	}
 
+	// A fixed default secret would let anyone forge an admin token against any
+	// KubePilot instance that didn't override it — generate a random one
+	// instead when JWT_SECRET is unset. It is process-local, not persisted:
+	// existing sessions become invalid on every restart until the operator
+	// sets JWT_SECRET explicitly (expected for production / persistent local
+	// use, see the startup warning in cmd/server/main.go).
+	jwtSecret := getEnv("JWT_SECRET", "")
+	jwtSecretGenerated := jwtSecret == ""
+	if jwtSecretGenerated {
+		jwtSecret = generateRandomSecret()
+	}
+
 	return &Config{
-		DatabaseURL:    dbURL,
-		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
-		JWTSecret:      getEnv("JWT_SECRET", "change-me-in-production"),
-		Port:           getEnv("PORT", "8080"),
-		LogLevel:       getEnv("LOG_LEVEL", "info"),
-		HeadlampURL:    getEnv("HEADLAMP_URL", ""),
-		TLSInsecure:    getBoolEnv("TLS_INSECURE", false),
-		WorkerInterval: getIntEnv("WORKER_INTERVAL_SECONDS", 300),
+		DatabaseURL:               dbURL,
+		RedisURL:                  getEnv("REDIS_URL", "redis://localhost:6379"),
+		JWTSecret:                 jwtSecret,
+		JWTSecretGenerated:        jwtSecretGenerated,
+		Port:                      getEnv("PORT", "8080"),
+		LogLevel:                  getEnv("LOG_LEVEL", "info"),
+		HeadlampURL:               getEnv("HEADLAMP_URL", ""),
+		TLSInsecure:               getBoolEnv("TLS_INSECURE", false),
+		WorkerInterval:            getIntEnv("WORKER_INTERVAL_SECONDS", 300),
 		HelmAutodiscover:          getBoolEnv("HELM_AUTODISCOVER", true),
 		NodeMetricsEnabled:        getBoolEnv("NODE_METRICS_ENABLED", true),
 		NodeMetricsRetentionHours: getIntEnv("NODE_METRICS_RETENTION_HOURS", 168),
-		StorageDriver:  storageDriver,
-		SQLitePath:     getEnv("SQLITE_PATH", "kubepilot.db"),
-		CacheDriver:    cacheDriver,
-		LocalMode:      local,
-		KubeconfigPath: getEnv("KUBECONFIG_PATH", ""),
-		SSHHost:           getEnv("SSH_HOST", ""),
-		SSHPort:           getIntEnv("SSH_PORT", 22),
-		SSHUser:           getEnv("SSH_USER", ""),
-		SSHPassword:       getEnv("SSH_PASSWORD", ""),
-		SSHKubeconfigPath: getEnv("SSH_KUBECONFIG_PATH", ""),
-		SSHSudo:           getBoolEnv("SSH_SUDO", false),
-		MCPAllowWrites: getBoolEnv("MCP_ALLOW_WRITES", false),
-		AdminEmail:     getEnv("ADMIN_EMAIL", ""),
-		AdminPassword:  adminPassword,
-		AdminName:      getEnv("ADMIN_NAME", "Administrator"),
-		InCluster:      getBoolEnv("IN_CLUSTER", false),
-		ClusterName:    getEnv("CLUSTER_NAME", "local"),
-		DemoMode:       demo,
+		StorageDriver:             storageDriver,
+		SQLitePath:                getEnv("SQLITE_PATH", "kubepilot.db"),
+		CacheDriver:               cacheDriver,
+		LocalMode:                 local,
+		KubeconfigPath:            getEnv("KUBECONFIG_PATH", ""),
+		SSHHost:                   getEnv("SSH_HOST", ""),
+		SSHPort:                   getIntEnv("SSH_PORT", 22),
+		SSHUser:                   getEnv("SSH_USER", ""),
+		SSHPassword:               getEnv("SSH_PASSWORD", ""),
+		SSHKubeconfigPath:         getEnv("SSH_KUBECONFIG_PATH", ""),
+		SSHSudo:                   getBoolEnv("SSH_SUDO", false),
+		MCPAllowWrites:            getBoolEnv("MCP_ALLOW_WRITES", false),
+		AdminEmail:                getEnv("ADMIN_EMAIL", ""),
+		AdminPassword:             adminPassword,
+		AdminName:                 getEnv("ADMIN_NAME", "Administrator"),
+		InCluster:                 getBoolEnv("IN_CLUSTER", false),
+		ClusterName:               getEnv("CLUSTER_NAME", "local"),
+		DemoMode:                  demo,
 	}
 }
 
@@ -161,6 +180,19 @@ func getIntEnv(key string, defaultVal int) int {
 		}
 	}
 	return defaultVal
+}
+
+// generateRandomSecret returns a random 32-byte hex-encoded string for
+// signing JWTs when JWT_SECRET is not configured.
+func generateRandomSecret() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failing means the entropy source is broken — there is no
+		// safe fallback, so fail loudly instead of signing tokens with a weak
+		// secret.
+		panic("config: failed to generate random JWT secret: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }
 
 func getBoolEnv(key string, defaultVal bool) bool {
