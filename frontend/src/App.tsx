@@ -16,6 +16,7 @@ import { Clusters } from './pages/Clusters'
 import { ClusterDetail } from './pages/ClusterDetail'
 import { Registries } from './pages/Registries'
 import { Settings } from './pages/Settings'
+import { ExceptionRules } from './pages/ExceptionRules'
 
 function ProtectedRoutes() {
   const { token, isLoading } = useAuth()
@@ -44,6 +45,7 @@ function ProtectedRoutes() {
           <Route path="/" element={<Overview />} />
           <Route path="/updates" element={<Updates />} />
           <Route path="/risks" element={<Risks />} />
+          <Route path="/exception-rules" element={<ExceptionRules />} />
           <Route path="/inventory" element={<Inventory />} />
           <Route path="/helm" element={<HelmPage />} />
           <Route path="/deploy" element={<Deploy />} />

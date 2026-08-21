@@ -81,7 +81,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ## État actuel du projet
 
-**Version courante** : `v0.2.0-alpha.9` (2026-08-06)
+**Version courante** : `v0.2.0-alpha.10` (2026-08-21)
 **Canal** : alpha
 **Branche principale** : `main`
 
@@ -104,7 +104,8 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 - [x] K8s Collector — Watch API Deployments/DaemonSets/StatefulSets/Nodes/Namespaces + décodage secrets Helm (`internal/collector`)
 - [x] Image Watcher — polling OCI registry, semver comparison, cache Redis (`internal/watcher/image.go`)
 - [x] Helm Watcher — polling index.yaml, version stable latest, cache Redis (`internal/watcher/helm.go`)
-- [x] Scoring Engine — 7 facteurs pondérés × env multiplier × exposure multiplier (`internal/scoring`)
+- [x] Scoring Engine — 7 facteurs pondérés × env multiplier × exposure multiplier, CVSS/fenêtres de maintenance/exception rules réellement évalués (`internal/scoring`, voir « Exception rules » et « CVSS et fenêtres de maintenance » plus bas)
+- [x] **Exception rules** (`GET/POST/PUT/DELETE /api/v1/exception-rules`) — suppress/reduce_severity/accept_risk appliqués par le moteur de scoring, CRUD réservé `operator`/`admin` en écriture
 - [x] Endpoints auth : `/auth/login`, `/auth/setup`, `/auth/refresh`, `/auth/me`
 - [x] Événements SSE avec EventBus goroutine-safe
 - [x] Graceful shutdown SIGTERM/SIGINT
@@ -121,6 +122,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 - [x] Page Helm — releases avec version installée vs disponible
 - [x] Page Nodes — table nodes avec statut conditions
 - [x] Page Integrations — gestion des comptes d'intégration
+- [x] Page Exceptions — gestion des exception rules (scoring)
 - [x] Page ClusterDetail
 - [x] Page Login + écran setup first-run
 - [x] Composants : DataTable, SlideOver, SeverityBadge, StatusBadge, FindingDetail, FindingStatusMenu, ClusterSelector
@@ -208,7 +210,7 @@ Voir `docs/scoring.md` pour la formule complète — `internal/scoring/engine_te
 - **Scope exprimé en colonnes discrètes** (`workload_id`/`image_pattern`/`cluster_id`+`namespace_name`), pas en `scope_kind`/`scope_selector` JSONB générique — plus simple à indexer et à requêter que le design que suggérait `docs/data-model.md` (lui-même jamais implémenté tel quel, corrigé au passage).
 - **Une seule règle appliquée par finding**, la plus spécifique (`workload_id` > `image_pattern` > cluster+namespace > cluster > global) — `internal/scoring.selectExceptionRule`/`scopeSpecificity`. Le matching `image_pattern` (glob `path.Match`) nécessite un aller en base pour charger le `ContainerImage` — fait paresseusement, seulement si une règle candidate en a besoin.
 - **`accept_risk` ré-affirme le statut `ignored` à chaque passe de scoring** tant que la règle reste active/non expirée (pas de job séparé d'application) — un opérateur qui repasse le finding à `open` le verra revenir à `ignored` au prochain cycle. Comportement assumé, pas documenté comme un piège avant ce commentaire.
-- **Pas d'endpoint REST ni d'UI** — `store.CreateExceptionRule`/`ListActiveExceptionRules` existent pour le moteur de scoring et les tests, rien côté API. Les règles s'insèrent directement en base pour l'instant.
+- **`GET/POST/PUT/DELETE /api/v1/exception-rules`** (2026-08-21) — lecture ouverte à tout rôle authentifié (savoir ce qui est exclu n'a rien de sensible), écriture `operator`/`admin`. Pas de `RecordAction` : même traitement que les autres CRUD de configuration (dépôts Helm, registries, intégrations) — réservé aux actions qui touchent réellement un cluster. Page frontend **Exceptions** (`/exception-rules`) : formulaire à 5 scopes (global/cluster/cluster+namespace/workload/pattern d'image), sélecteur de workload alimenté par le cluster choisi (`getWorkloads({cluster_id})`), pause/reprise réutilisant le `PUT` complet plutôt qu'une route dédiée.
 
 ### CVSS et fenêtres de maintenance (depuis Unreleased)
 - **Facteur CVSS** (`internal/scoring.cvssFactorFromCVEs`) lit `UpdateFinding.CVEs` (JSONB, tableau `{id, cvss}`) et prend le **maximum**, pas le premier ni la somme — formule `(cvss_max/10)×20`. Rien n'écrit encore cette colonne (scanner CVE = V2 roadmap) : la brique est correcte, juste jamais nourrie pour l'instant.

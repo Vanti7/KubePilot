@@ -28,6 +28,7 @@ import type {
   SystemResources,
   ManifestApplyResponse,
   RemediateFindingResponse,
+  ExceptionRule,
 } from '../types'
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
@@ -387,6 +388,42 @@ export async function testHelmRepository(id: string): Promise<HelmRepositoryTest
 
 export async function deleteHelmRepository(id: string): Promise<void> {
   await api.delete(`/helm-repositories/${id}`)
+}
+
+// Exception rules — change how the scoring engine treats matching findings
+// (suppress / reduce severity / accept risk). Scope is whichever of
+// cluster_id, workload_id or image_pattern is set; namespace_name narrows a
+// cluster-scoped rule further. None set = global.
+export interface ExceptionRulePayload {
+  name: string
+  rule_type: string
+  cluster_id?: string
+  namespace_name?: string
+  workload_id?: string
+  finding_kind?: string
+  image_pattern?: string
+  reason: string
+  expires_at?: string | null
+  is_active?: boolean
+}
+
+export async function getExceptionRules(): Promise<ExceptionRule[]> {
+  const { data } = await api.get<ExceptionRule[]>('/exception-rules')
+  return data
+}
+
+export async function createExceptionRule(payload: ExceptionRulePayload): Promise<ExceptionRule> {
+  const { data } = await api.post<ExceptionRule>('/exception-rules', payload)
+  return data
+}
+
+export async function updateExceptionRule(id: string, payload: ExceptionRulePayload): Promise<ExceptionRule> {
+  const { data } = await api.put<ExceptionRule>(`/exception-rules/${id}`, payload)
+  return data
+}
+
+export async function deleteExceptionRule(id: string): Promise<void> {
+  await api.delete(`/exception-rules/${id}`)
 }
 
 export default api

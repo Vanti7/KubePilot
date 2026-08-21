@@ -8,6 +8,7 @@ import {
   Package,
   KeyRound,
   ShieldAlert,
+  ShieldOff,
   Calendar,
   Clock,
   Plug,
@@ -70,6 +71,7 @@ export function Sidebar() {
     { to: '/clusters', icon: <Network size={16} />, label: 'Clusters' },
     { to: '/registries', icon: <Container size={16} />, label: 'Registries' },
     { to: '/risks', icon: <ShieldAlert size={16} />, label: 'Risks' },
+    { to: '/exception-rules', icon: <ShieldOff size={16} />, label: 'Exceptions' },
     {
       to: '/maintenance',
       icon: <Calendar size={16} />,

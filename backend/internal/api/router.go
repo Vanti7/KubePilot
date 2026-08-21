@@ -170,6 +170,18 @@ func NewRouter(
 		helmRepos.POST("/:id/test", middleware.RequireRole("operator"), helmRepoH.TestHelmRepository)
 	}
 
+	// Exception rules — change how the scoring engine treats matching
+	// findings (suppress/reduce_severity/accept_risk). See
+	// internal/scoring.ScoreFinding and docs/scoring.md §9.
+	excRuleH := handlers.NewExceptionRuleHandler(s, logger)
+	excRules := v1.Group("/exception-rules")
+	{
+		excRules.GET("", excRuleH.ListExceptionRules)
+		excRules.POST("", middleware.RequireRole("operator"), excRuleH.CreateExceptionRule)
+		excRules.PUT("/:id", middleware.RequireRole("operator"), excRuleH.UpdateExceptionRule)
+		excRules.DELETE("/:id", middleware.RequireRole("operator"), excRuleH.DeleteExceptionRule)
+	}
+
 	// Settings — non-secret runtime config (admin only).
 	settingsH := handlers.NewSettingsHandler(cfg, version)
 	v1.GET("/settings", middleware.RequireRole("admin"), settingsH.GetSettings)

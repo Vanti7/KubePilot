@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kubepilot/backend/internal/models"
+	"gorm.io/gorm"
 )
 
 // CreateExceptionRule adds a new exception rule.
@@ -14,6 +15,51 @@ func (s *Store) CreateExceptionRule(ctx context.Context, r *models.ExceptionRule
 		r.ID = uuid.New()
 	}
 	return s.DB.WithContext(ctx).Create(r).Error
+}
+
+// ListExceptionRules returns every exception rule (active, inactive and
+// expired alike) for the management page — unlike ListActiveExceptionRules,
+// which the scoring engine uses and which only returns rules that currently
+// apply. Cluster/Workload are preloaded so the UI can show names, not just IDs.
+func (s *Store) ListExceptionRules(ctx context.Context) ([]models.ExceptionRule, error) {
+	var rules []models.ExceptionRule
+	err := s.DB.WithContext(ctx).
+		Preload("Cluster").
+		Preload("Workload").
+		Order("created_at DESC").
+		Find(&rules).Error
+	return rules, err
+}
+
+// GetExceptionRule retrieves a single exception rule by ID.
+func (s *Store) GetExceptionRule(ctx context.Context, id string) (*models.ExceptionRule, error) {
+	var rule models.ExceptionRule
+	err := s.DB.WithContext(ctx).Preload("Cluster").Preload("Workload").
+		Where("id = ?", id).First(&rule).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &rule, nil
+}
+
+// UpdateExceptionRule replaces an exception rule's editable fields.
+func (s *Store) UpdateExceptionRule(ctx context.Context, r *models.ExceptionRule) error {
+	return s.DB.WithContext(ctx).Save(r).Error
+}
+
+// DeleteExceptionRule removes an exception rule.
+func (s *Store) DeleteExceptionRule(ctx context.Context, id string) error {
+	result := s.DB.WithContext(ctx).Delete(&models.ExceptionRule{}, "id = ?", id)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 // ListActiveExceptionRules returns exception rules that are active and not

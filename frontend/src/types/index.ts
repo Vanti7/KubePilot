@@ -314,6 +314,27 @@ export interface HelmRepositoryTestResult {
   message: string
 }
 
+export type ExceptionRuleType = 'suppress' | 'reduce_severity' | 'accept_risk'
+
+export interface ExceptionRule {
+  id: string
+  name: string
+  rule_type: ExceptionRuleType
+  cluster_id?: string
+  cluster?: { id: string; name: string }
+  namespace_name?: string
+  workload_id?: string
+  workload?: { id: string; name: string }
+  finding_kind?: string
+  image_pattern?: string
+  reason: string
+  expires_at?: string
+  created_by_id?: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
 export interface FindingFilter {
   severity?: Severity[]
   status?: FindingStatus[]
