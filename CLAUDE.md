@@ -155,7 +155,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 - [x] Gestion des registries privés dans l'UI (Harbor, ECR, GCR, ACR) + dépôts de charts Helm
 - [x] Nettoyage en cascade des `container_images` orphelines au `DeleteWorkloadsNotSeenSince`
 - [x] Déploiement in-cluster opérationnel : Jenkins → Harbor → ArgoCD (voir `docs/installation.md` §2)
-- [~] Tests unitaires backend : comparaison semver faite (`internal/watcher/tags_test.go`) ; scale/restart, deploy manifest et set-image aussi testés (`internal/k8sops`) ; reste scoring engine + le reste du store
+- [~] Tests unitaires backend : comparaison semver (`internal/watcher/tags_test.go`), scale/restart/deploy manifest/set-image (`internal/k8sops`), SSRF guard (`internal/netguard`), scoring engine (`internal/scoring/engine_test.go` — formule complète, placeholder fenêtre de maintenance épinglé), findings et upsert workload (`internal/store`, dont un test de non-régression direct sur le bug UUID fantôme du 2026-08-01) tous testés ; reste le reste du `store` (clusters, helm releases/repos, registries, namespaces, métriques, secrets)
 - [ ] Tests d'intégration frontend (Playwright)
 - [x] Seed data pour démo / développement local — mode démo (`DEMO_MODE=true`), voir « Périmètre livré »
 - [x] Page Settings (gestion utilisateurs, infos système) — voir « Périmètre livré »
