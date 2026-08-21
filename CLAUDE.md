@@ -81,7 +81,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ## État actuel du projet
 
-**Version courante** : `v0.2.0-alpha.10` (2026-08-21)
+**Version courante** : `v0.2.0-alpha.11` (2026-08-21)
 **Canal** : alpha
 **Branche principale** : `main`
 
@@ -123,6 +123,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 - [x] Page Nodes — table nodes avec statut conditions
 - [x] Page Integrations — gestion des comptes d'intégration
 - [x] Page Exceptions — gestion des exception rules (scoring)
+- [x] Page History — audit log paginé/filtrable, consomme l'API `action-logs` existante
 - [x] Page ClusterDetail
 - [x] Page Login + écran setup first-run
 - [x] Composants : DataTable, SlideOver, SeverityBadge, StatusBadge, FindingDetail, FindingStatusMenu, ClusterSelector
@@ -161,7 +162,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 - [ ] Tests d'intégration frontend (Playwright)
 - [x] Seed data pour démo / développement local — mode démo (`DEMO_MODE=true`), voir « Périmètre livré »
 - [x] Page Settings (gestion utilisateurs, infos système) — voir « Périmètre livré »
-- [ ] Page History (audit log des actions) — `GET /api/v1/action-logs` existe déjà côté API, pas encore de page dédiée
+- [x] Page History (audit log des actions) — table paginée/filtrable + slide-over détail, consomme `GET /api/v1/action-logs` (aucun changement backend)
 
 ---
 

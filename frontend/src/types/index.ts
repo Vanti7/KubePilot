@@ -433,3 +433,27 @@ export interface AppSettings {
   node_metrics_retention_hours: number
   mcp_allow_writes: boolean
 }
+
+export interface ActionLog {
+  id: string
+  user_id?: string
+  user?: Pick<User, 'id' | 'name' | 'email'>
+  action: string
+  entity_type: string
+  entity_id: string
+  status: 'success' | 'failure'
+  details?: Record<string, any>
+  ip_address?: string
+  user_agent?: string
+  created_at: string
+}
+
+export interface ActionLogFilter {
+  user_id?: string
+  action?: string
+  entity_type?: string
+  entity_id?: string
+  status?: string
+  limit?: number
+  offset?: number
+}

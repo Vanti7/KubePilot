@@ -79,13 +79,7 @@ export function Sidebar() {
       disabled: true,
       tag: 'V2',
     },
-    {
-      to: '/history',
-      icon: <Clock size={16} />,
-      label: 'History',
-      disabled: true,
-      tag: 'V2',
-    },
+    { to: '/history', icon: <Clock size={16} />, label: 'History' },
     { to: '/integrations', icon: <Plug size={16} />, label: 'Integrations' },
     ...(user?.role === 'admin'
       ? [{ to: '/settings', icon: <SettingsIcon size={16} />, label: 'Settings' }]

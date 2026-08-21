@@ -18,6 +18,7 @@
 
 ## ✅ Fait récemment
 
+- [x] **Page History** (2026-08-21) — l'API `GET /api/v1/action-logs` existait déjà (fondations audit trail), seule la page manquait (`disabled`/`V2` dans la sidebar depuis le début). Table paginée + filtres action/entité/statut + slide-over détail (`details` JSONB, IP, user-agent). Zéro changement backend. Dernier item du checklist beta côté fonctionnalités — reste tests store + Playwright
 - [x] **Exception rules : endpoint REST + page de gestion** (2026-08-21) — suite du lot précédent, qui n'avait volontairement pas d'API/UI. `GET/POST/PUT/DELETE /api/v1/exception-rules` (lecture tout rôle, écriture `operator`/`admin`), nouveaux `store.ListExceptionRules`/`GetExceptionRule`/`UpdateExceptionRule`/`DeleteExceptionRule`. Page **Exceptions** (`/exception-rules`) : table + formulaire (5 scopes, sélecteur de workload par cluster, pattern d'image), pause/reprise via le même `PUT`. Pas de `RecordAction` (CRUD de config, même traitement que dépôts Helm/registries/intégrations). `tsc`/build frontend propres, `go build/vet/test` propres, validé en direct (mode démo) : création globale + scopée cluster, jointure `cluster` dans la liste, `rule_type` invalide → 400, pause confirmée, `viewer` 200 en lecture / 403 en écriture, suppression confirmée
 - [x] **Scoring engine — CVSS, fenêtres de maintenance, exception rules** (2026-08-06) — les 3 briques manquantes face à `docs/scoring.md` (trouvées en écrivant les tests de scoring plus tôt dans la journée) sont implémentées : facteur CVSS lu depuis `UpdateFinding.CVEs`, `isWindowActive` évalue pour de vrai la planification cron (`robfig/cron/v3`, nouvelle dépendance), `ExceptionRule` gagne `RuleType`/`Name`/`NamespaceName` (migration `011_exception_rule_type.sql`) et ses 3 effets sont appliqués dans `ScoreFinding` avec priorité par spécificité de scope. `internal/scoring/engine_test.go` passe de 5 à 15 tests, dont une reproduction exacte de l'Example 1 chiffré de la doc (82.6, critical). Voir décision détaillée ci-dessous et `CHANGELOG.md`. **Reste** : annotation `kubepilot/criticality` vs `kubepilot.io/criticality` de la doc toujours pas réconciliée (cosmétique, pas fonctionnel)
 - [x] **Passe de sécurité complète** (2026-08-06) — revue en 3 phases (identification par agents parallèles → filtration indépendante par vulnérabilité → seuil de confiance ≥8), 7 failles confirmées et corrigées :
@@ -86,7 +87,7 @@ Le rollout déclenché par notre push RBAC est resté bloqué sur deux problème
 ### En continu
 - [~] Tests backend — `internal/watcher/tags_test.go` (semver), `internal/store/action_logs_test.go`, `internal/k8sops/workloads_test.go` (clientset factice), `internal/netguard/netguard_test.go` (SSRF) faits ; **2026-08-06** : `internal/scoring/engine_test.go` (formule complète contre les cas par défaut et le cas annoté/environnement, calculée à la main et recoupée avec le code — voir décision ci-dessous sur l'écart docs/scoring.md ; placeholder fenêtre de maintenance épinglé ; `ScoreAll` ignore bien les findings non actifs), `internal/store/findings_test.go` (non-régression `first_detected_at` préservé au conflit, `ResolveActiveFindingForImage` épargne un finding `ignored`, jointures `ListFindings`), `internal/store/workloads_test.go` (non-régression directe sur le bug UUID fantôme du 2026-08-01) ; **reste** le reste du store (clusters, helm releases/repos, registries, namespaces, métriques, secrets)
 - [x] Page Settings (utilisateurs, infos système)
-- [ ] Page History (audit log)
+- [x] Page History (audit log)
 - [x] UI registries privés (Harbor, ECR, GCR, ACR) + dépôts de charts Helm
 
 ---
@@ -144,5 +145,5 @@ cd frontend; $env:VITE_PROXY_TARGET="http://localhost:8090"; npm run dev -- --po
 ## 📌 Rappels process
 
 - **Changelog obligatoire** : toute modif notable → section `[Unreleased]` du `CHANGELOG.md`.
-- **Versioning** : SemVer + cycle alpha/beta/rc/stable (cf. CLAUDE.md). Version courante : `v0.2.0-alpha.10`.
+- **Versioning** : SemVer + cycle alpha/beta/rc/stable (cf. CLAUDE.md). Version courante : `v0.2.0-alpha.11`.
 - **Commits** : Conventional Commits (`type(scope): message`).

@@ -29,6 +29,8 @@ import type {
   ManifestApplyResponse,
   RemediateFindingResponse,
   ExceptionRule,
+  ActionLog,
+  ActionLogFilter,
 } from '../types'
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
@@ -424,6 +426,12 @@ export async function updateExceptionRule(id: string, payload: ExceptionRulePayl
 
 export async function deleteExceptionRule(id: string): Promise<void> {
   await api.delete(`/exception-rules/${id}`)
+}
+
+// Action logs — audit trail of every write action KubePilot has taken.
+export async function getActionLogs(filter?: ActionLogFilter): Promise<PaginatedResponse<ActionLog>> {
+  const { data } = await api.get<PaginatedResponse<ActionLog>>('/action-logs', { params: filter })
+  return data
 }
 
 export default api
