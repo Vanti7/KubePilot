@@ -26,7 +26,7 @@ import (
 )
 
 // version is the server build version, surfaced over MCP serverInfo.
-const version = "0.2.0-alpha.8"
+const version = "0.2.0-alpha.9"
 
 func main() {
 	// Subcommand dispatch. With no argument the HTTP server runs (the default

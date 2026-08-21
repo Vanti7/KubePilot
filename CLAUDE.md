@@ -81,7 +81,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ## État actuel du projet
 
-**Version courante** : `v0.2.0-alpha.8` (2026-08-06)
+**Version courante** : `v0.2.0-alpha.9` (2026-08-06)
 **Canal** : alpha
 **Branche principale** : `main`
 
@@ -201,7 +201,18 @@ Utiliser `gorm.io/datatypes.JSON` côté Go, `Record<string, any>` côté TypeSc
 ### Scoring
 Score = Σ(facteur × poids) × env_multiplier × exposure_multiplier, cap à 100.
 Seuils : Critical ≥ 80, High 60-79, Medium 40-59, Low 20-39, Info < 20.
-Voir `docs/scoring.md` pour la formule complète.
+Voir `docs/scoring.md` pour la formule complète — `internal/scoring/engine_test.go` reproduit son Example 1 chiffré exactement (82.6, critical), donc la formule et le code sont vérifiés identiques, pas juste documentés en parallèle.
+
+### Exception rules (depuis Unreleased)
+- **`ExceptionRule` a fallu compléter le modèle avant de pouvoir l'implémenter** : le schéma original (`migrations/001_initial.sql`) n'avait ni colonne `rule_type` ni `name` — irréalisable tel quel malgré sa description dans `docs/scoring.md` §9. Ajoutés (`Name`, `RuleType`, `NamespaceName`) via `migrations/011_exception_rule_type.sql` + `AutoMigrate`.
+- **Scope exprimé en colonnes discrètes** (`workload_id`/`image_pattern`/`cluster_id`+`namespace_name`), pas en `scope_kind`/`scope_selector` JSONB générique — plus simple à indexer et à requêter que le design que suggérait `docs/data-model.md` (lui-même jamais implémenté tel quel, corrigé au passage).
+- **Une seule règle appliquée par finding**, la plus spécifique (`workload_id` > `image_pattern` > cluster+namespace > cluster > global) — `internal/scoring.selectExceptionRule`/`scopeSpecificity`. Le matching `image_pattern` (glob `path.Match`) nécessite un aller en base pour charger le `ContainerImage` — fait paresseusement, seulement si une règle candidate en a besoin.
+- **`accept_risk` ré-affirme le statut `ignored` à chaque passe de scoring** tant que la règle reste active/non expirée (pas de job séparé d'application) — un opérateur qui repasse le finding à `open` le verra revenir à `ignored` au prochain cycle. Comportement assumé, pas documenté comme un piège avant ce commentaire.
+- **Pas d'endpoint REST ni d'UI** — `store.CreateExceptionRule`/`ListActiveExceptionRules` existent pour le moteur de scoring et les tests, rien côté API. Les règles s'insèrent directement en base pour l'instant.
+
+### CVSS et fenêtres de maintenance (depuis Unreleased)
+- **Facteur CVSS** (`internal/scoring.cvssFactorFromCVEs`) lit `UpdateFinding.CVEs` (JSONB, tableau `{id, cvss}`) et prend le **maximum**, pas le premier ni la somme — formule `(cvss_max/10)×20`. Rien n'écrit encore cette colonne (scanner CVE = V2 roadmap) : la brique est correcte, juste jamais nourrie pour l'instant.
+- **`isWindowActive` évalue pour de vrai la planification cron** (`github.com/robfig/cron/v3`, nouvelle dépendance) au lieu de renvoyer `false` en dur. Technique : `Schedule.Next` ne donne que « la prochaine occurrence après t » ; pour savoir si *maintenant* est couvert par une fenêtre de durée `D`, on interroge `Next(now - D)` — si le résultat est ≤ `now`, une occurrence a démarré dans `(now-D, now]` et n'est pas encore terminée. Fuseau horaire (`MaintenanceWindow.Timezone`) appliqué avant l'évaluation, repli UTC si invalide.
 
 ### In-cluster vs dev local
 - En production (Helm) : `IN_CLUSTER=true`, le pod utilise son SA token.

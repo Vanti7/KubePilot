@@ -75,6 +75,14 @@ const (
 	FindingStatusResolved = "resolved"
 )
 
+// ExceptionRule type — how the scoring engine applies a matching rule to a
+// finding (docs/scoring.md §9).
+const (
+	ExceptionRuleTypeSuppress       = "suppress"
+	ExceptionRuleTypeReduceSeverity = "reduce_severity"
+	ExceptionRuleTypeAcceptRisk     = "accept_risk"
+)
+
 // Action log action
 const (
 	ActionLogCreate         = "create"
@@ -450,22 +458,31 @@ type ActionLog struct {
 	CreatedAt  time.Time      `gorm:"index"                                          json:"created_at"`
 }
 
-// ExceptionRule suppresses a finding for a given scope.
+// ExceptionRule changes how the scoring engine treats findings matching a
+// given scope — see docs/scoring.md §9 for the three RuleType effects and
+// the scope-matching precedence (most specific wins): WorkloadID >
+// ImagePattern > (ClusterID+NamespaceName) > ClusterID > global (none set).
 type ExceptionRule struct {
-	ID           uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
-	ClusterID    *uuid.UUID     `gorm:"type:uuid;index"                                json:"cluster_id,omitempty"`
-	Cluster      *Cluster       `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
-	WorkloadID   *uuid.UUID     `gorm:"type:uuid;index"                                json:"workload_id,omitempty"`
-	Workload     *Workload      `gorm:"foreignKey:WorkloadID"                          json:"workload,omitempty"`
-	FindingKind  string         `                                                      json:"finding_kind,omitempty"`
-	ImagePattern string         `                                                      json:"image_pattern,omitempty"`
-	Reason       string         `gorm:"not null"                                       json:"reason"`
-	ExpiresAt    *time.Time     `                                                      json:"expires_at,omitempty"`
-	CreatedByID  *uuid.UUID     `gorm:"type:uuid"                                      json:"created_by_id,omitempty"`
-	Metadata     datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"metadata,omitempty"`
-	IsActive     bool           `gorm:"default:true"                                   json:"is_active"`
-	CreatedAt    time.Time      `                                                      json:"created_at"`
-	UpdatedAt    time.Time      `                                                      json:"updated_at"`
+	ID   uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	Name string    `gorm:"not null"                                       json:"name"`
+	// RuleType: "suppress" (score 0/info), "reduce_severity" (one level
+	// down), or "accept_risk" (status forced to ignored). See the
+	// ExceptionRuleType* constants above.
+	RuleType      string         `gorm:"not null;default:'suppress'"                    json:"rule_type"`
+	ClusterID     *uuid.UUID     `gorm:"type:uuid;index"                                json:"cluster_id,omitempty"`
+	Cluster       *Cluster       `gorm:"foreignKey:ClusterID"                           json:"cluster,omitempty"`
+	NamespaceName string         `                                                      json:"namespace_name,omitempty"`
+	WorkloadID    *uuid.UUID     `gorm:"type:uuid;index"                                json:"workload_id,omitempty"`
+	Workload      *Workload      `gorm:"foreignKey:WorkloadID"                          json:"workload,omitempty"`
+	FindingKind   string         `                                                      json:"finding_kind,omitempty"`
+	ImagePattern  string         `                                                      json:"image_pattern,omitempty"`
+	Reason        string         `gorm:"not null"                                       json:"reason"`
+	ExpiresAt     *time.Time     `                                                      json:"expires_at,omitempty"`
+	CreatedByID   *uuid.UUID     `gorm:"type:uuid"                                      json:"created_by_id,omitempty"`
+	Metadata      datatypes.JSON `gorm:"type:jsonb;default:'{}'"                        json:"metadata,omitempty"`
+	IsActive      bool           `gorm:"default:true"                                   json:"is_active"`
+	CreatedAt     time.Time      `                                                      json:"created_at"`
+	UpdatedAt     time.Time      `                                                      json:"updated_at"`
 }
 
 // IntegrationAccount stores configuration for external integrations.

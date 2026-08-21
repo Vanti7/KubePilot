@@ -539,28 +539,41 @@ JSON columns use PostgreSQL `jsonb` for indexing and operator support.
 
 ### 2.16 ExceptionRule
 
-**Role:** Suppresses or reduces risk scores for findings matching specified criteria. Rules can be time-limited (expires_at) and scoped to a namespace, workload, or image pattern. The scoring engine checks active exception rules before publishing final scores.
+**Role:** Changes how the scoring engine treats findings matching a given scope. Rules can be time-limited (`expires_at`) and/or toggled off (`is_active`) without deleting them. `internal/scoring.ScoreFinding` evaluates active, non-expired rules after computing the base score and applies at most one — the most specific scope match wins (workload > image_pattern > namespace > cluster > global). See `docs/scoring.md` §9.
 
 **Table:** `exception_rules`
+
+Scope is expressed as discrete nullable columns rather than a generic `scope_kind`/`scope_selector` pair — a rule's scope is whichever of `workload_id`, `image_pattern`, or `cluster_id`(+`namespace_name`) is set; a rule with none of them set is global.
 
 | Field | SQL Type | Nullable | Constraints | Description |
 |---|---|---|---|---|
 | `id` | `uuid` | NO | PK | Surrogate primary key |
-| `name` | `text` | NO | NOT NULL | Human-readable description of why this exception exists |
-| `scope_kind` | `text` | NO | NOT NULL, CHECK IN ('global','cluster','namespace','workload','image_pattern') | Scope level for matching |
-| `scope_selector` | `jsonb` | NO | NOT NULL | Scope criteria. For cluster: `{"cluster_id": "..."}`. For namespace: `{"cluster_id": "...", "namespace": "..."}`. For image pattern: `{"pattern": "myregistry.io/myrepo:*"}`. |
-| `rule_type` | `text` | NO | NOT NULL, CHECK IN ('suppress','reduce_severity','accept_risk') | Effect on matched findings. `suppress` = exclude from scoring. `reduce_severity` = lower by one level. `accept_risk` = mark as acknowledged. |
+| `name` | `text` | NO | NOT NULL | Human-readable label, shown on the "Exception Applied" badge |
+| `rule_type` | `text` | NO | NOT NULL, default `'suppress'` | Effect on a matched finding: `suppress` (score 0, severity info), `reduce_severity` (down one band), `accept_risk` (status forced to `ignored`) — see `models.ExceptionRuleType*` |
+| `cluster_id` | `uuid` | YES | FK → clusters.id, ON DELETE CASCADE | Cluster scope (with `namespace_name` unset) or cluster+namespace scope (with it set) |
+| `namespace_name` | `text` | YES | | Narrows a cluster-scoped rule to one namespace |
+| `workload_id` | `uuid` | YES | FK → workloads.id, ON DELETE CASCADE | Workload scope — most specific, always wins over the others when multiple rules match |
+| `finding_kind` | `text` | YES | | Optional additional filter on `update_findings.kind` (`image`/`helm`), independent of scope |
+| `image_pattern` | `text` | YES | | Glob (`path.Match` semantics) matched against `registry/repository:tag` — image findings only |
 | `reason` | `text` | NO | NOT NULL | Mandatory justification text for audit trail |
 | `expires_at` | `timestamptz` | YES | | Rule expiry time. NULL = permanent. Expired rules have no effect. |
-| `created_by` | `uuid` | NO | FK → users.id, NOT NULL | User who created this rule |
+| `created_by_id` | `uuid` | YES | FK → users.id, ON DELETE SET NULL | User who created this rule, if created through the API |
+| `metadata` | `jsonb` | NO | NOT NULL, default `'{}'` | Free-form extra context, not read by the scoring engine |
+| `is_active` | `boolean` | NO | NOT NULL, default `true` | Manual on/off switch, independent of `expires_at` |
 
 **Relationships:**
-- Created by one User
+- Optionally scoped to one Cluster
+- Optionally scoped to one Workload
+- Optionally created by one User
 
 **Indexes:**
 - `exception_rules_pkey` on `id`
-- `exception_rules_scope_kind_idx` on `scope_kind`
-- `exception_rules_expires_at_idx` on `expires_at` WHERE `expires_at IS NOT NULL`
+- `idx_exception_rules_cluster_id` on `cluster_id`
+- `idx_exception_rules_workload_id` on `workload_id`
+- `idx_exception_rules_is_active` on `is_active`
+- `idx_exception_rules_rule_type` on `rule_type`
+
+**Not yet built:** there is no REST endpoint or UI for managing exception rules — only `store.CreateExceptionRule`/`store.ListActiveExceptionRules`, used by the scoring engine and by tests. Rows have to be inserted directly today.
 
 **UI Usage:** Exception rules management page. "Exception applied" indicator on finding detail. Expiry countdown badge.
 

@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"path"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kubepilot/backend/internal/models"
 	"github.com/kubepilot/backend/internal/store"
+	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 	"gorm.io/datatypes"
 )
@@ -43,6 +46,54 @@ type ScoreFactors struct {
 	EnvMultiplier           float64 `json:"env_multiplier"`
 	ExposureMultiplier      float64 `json:"exposure_multiplier"`
 	WeightedSum             float64 `json:"weighted_sum"`
+	// ExceptionApplied is set when an active ExceptionRule matched this
+	// finding (docs/scoring.md §9) — nil otherwise.
+	ExceptionApplied *ExceptionApplied `json:"exception_applied,omitempty"`
+}
+
+// ExceptionApplied records which ExceptionRule affected a score, for the
+// "Exception Applied" / "Risk Accepted" badge in the UI.
+type ExceptionApplied struct {
+	RuleID   string `json:"rule_id"`
+	RuleName string `json:"rule_name"`
+	RuleType string `json:"rule_type"`
+	Reason   string `json:"reason"`
+}
+
+// cveEntry is one element of UpdateFinding.CVEs (JSONB array). Nothing in
+// this codebase writes it yet — populating it is a future vulnerability
+// scanner integration (Trivy/Grype/Snyk, see CLAUDE.md roadmap V2) — but the
+// CVSS factor below reads it so the formula is correct once something does.
+type cveEntry struct {
+	ID   string  `json:"id"`
+	CVSS float64 `json:"cvss"`
+}
+
+// cvssFactorFromCVEs implements docs/scoring.md §4 Factor 3: the maximum
+// CVSS score across all CVEs associated with the finding, linearly scaled to
+// a 0-20 raw factor. Returns 0 if there are no CVEs or the column doesn't
+// parse (malformed data should not crash scoring).
+func cvssFactorFromCVEs(raw datatypes.JSON) float64 {
+	if len(raw) == 0 {
+		return 0
+	}
+	var entries []cveEntry
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return 0
+	}
+	var maxCVSS float64
+	for _, e := range entries {
+		if e.CVSS > maxCVSS {
+			maxCVSS = e.CVSS
+		}
+	}
+	if maxCVSS <= 0 {
+		return 0
+	}
+	if maxCVSS > 10 {
+		maxCVSS = 10 // defensive clamp against out-of-range scanner data
+	}
+	return (maxCVSS / 10.0) * 20
 }
 
 // ScoreFinding computes and persists a RiskScore for the given finding, workload and cluster.
@@ -143,8 +194,7 @@ func (se *ScoringEngine) ScoreFinding(
 	}
 
 	// --- CVSS score factor (weight 0.20) ---
-	// Reserved for future scanner integration; 0 for MVP.
-	factors.CVSSScore = 0
+	factors.CVSSScore = cvssFactorFromCVEs(finding.CVEs)
 
 	// --- Weighted sum ---
 	weighted := factors.UpdateType*0.25 +
@@ -194,6 +244,33 @@ func (se *ScoringEngine) ScoreFinding(
 
 	severity := scoreToSeverity(score)
 
+	// --- Exception rules (docs/scoring.md §9) ---
+	// Applied after the base score/severity, on top of them — never folded
+	// into the weighted sum, since an exception is an override of the
+	// outcome, not one more input to it.
+	rule, err := se.selectExceptionRule(ctx, finding)
+	if err != nil {
+		se.logger.Warn("evaluate exception rules", zap.String("finding_id", finding.ID.String()), zap.Error(err))
+	}
+	if rule != nil {
+		switch rule.RuleType {
+		case models.ExceptionRuleTypeSuppress:
+			score = 0
+			severity = models.SeverityInfo
+		case models.ExceptionRuleTypeReduceSeverity:
+			severity = reduceSeverityOneLevel(severity)
+		case models.ExceptionRuleTypeAcceptRisk:
+			// Score/severity unchanged; the finding's status is forced to
+			// ignored below, alongside the severity update.
+		}
+		factors.ExceptionApplied = &ExceptionApplied{
+			RuleID:   rule.ID.String(),
+			RuleName: rule.Name,
+			RuleType: rule.RuleType,
+			Reason:   rule.Reason,
+		}
+	}
+
 	factorsJSON, err := json.Marshal(factors)
 	if err != nil {
 		return nil, fmt.Errorf("marshal factors: %w", err)
@@ -214,12 +291,114 @@ func (se *ScoringEngine) ScoreFinding(
 		return nil, fmt.Errorf("upsert risk score: %w", err)
 	}
 
-	// Update finding severity to match the computed score.
+	// Update finding severity to match the computed score. An accept_risk
+	// rule additionally forces the finding to ignored, re-asserted on every
+	// scoring pass for as long as the rule stays active/unexpired — that
+	// re-assertion is what "the finding status is automatically set to
+	// ignored" (docs/scoring.md §9) means in a system with no separate
+	// enforcement job.
+	updates := map[string]interface{}{"severity": severity}
+	if rule != nil && rule.RuleType == models.ExceptionRuleTypeAcceptRisk {
+		updates["status"] = models.FindingStatusIgnored
+		updates["status_reason"] = fmt.Sprintf("Exception rule %q: %s", rule.Name, rule.Reason)
+		updates["status_changed_at"] = time.Now()
+	}
 	se.store.DB.WithContext(ctx).
 		Model(finding).
-		Update("severity", severity)
+		Updates(updates)
 
 	return rs, nil
+}
+
+// reduceSeverityOneLevel downgrades a severity by exactly one band
+// (docs/scoring.md §9's reduce_severity effect), floored at info.
+func reduceSeverityOneLevel(sev string) string {
+	switch sev {
+	case models.SeverityCritical:
+		return models.SeverityHigh
+	case models.SeverityHigh:
+		return models.SeverityMedium
+	case models.SeverityMedium:
+		return models.SeverityLow
+	default:
+		return models.SeverityInfo
+	}
+}
+
+// scopeSpecificity ranks an ExceptionRule's scope from most to least
+// specific, so selectExceptionRule can prefer a workload-level rule over a
+// cluster-wide one when both happen to match the same finding.
+func scopeSpecificity(r models.ExceptionRule) int {
+	switch {
+	case r.WorkloadID != nil:
+		return 4
+	case r.ImagePattern != "":
+		return 3
+	case r.ClusterID != nil && r.NamespaceName != "":
+		return 2
+	case r.ClusterID != nil:
+		return 1
+	default:
+		return 0 // global — ClusterID, WorkloadID and ImagePattern all unset
+	}
+}
+
+// ruleMatchesScope reports whether rule applies to finding. containerImage is
+// only consulted for image_pattern rules and may be nil (e.g. Helm findings,
+// or when the lookup failed) — such rules simply never match in that case.
+func ruleMatchesScope(rule models.ExceptionRule, finding *models.UpdateFinding, containerImage *models.ContainerImage) bool {
+	if rule.FindingKind != "" && rule.FindingKind != finding.Kind {
+		return false
+	}
+	switch {
+	case rule.WorkloadID != nil:
+		return finding.WorkloadID != nil && *finding.WorkloadID == *rule.WorkloadID
+	case rule.ImagePattern != "":
+		if containerImage == nil {
+			return false
+		}
+		ref := fmt.Sprintf("%s/%s:%s", containerImage.Registry, containerImage.Repository, containerImage.Tag)
+		matched, err := path.Match(rule.ImagePattern, ref)
+		return err == nil && matched
+	case rule.ClusterID != nil && rule.NamespaceName != "":
+		return finding.ClusterID == *rule.ClusterID && finding.NamespaceName == rule.NamespaceName
+	case rule.ClusterID != nil:
+		return finding.ClusterID == *rule.ClusterID
+	default:
+		return true // global: no scope field set
+	}
+}
+
+// selectExceptionRule returns the single most specific active, non-expired
+// ExceptionRule that matches finding, or nil if none do. Only one rule's
+// effect is ever applied per finding (docs/scoring.md §9 describes a single
+// "Exception Applied" badge, not a stack of them).
+func (se *ScoringEngine) selectExceptionRule(ctx context.Context, finding *models.UpdateFinding) (*models.ExceptionRule, error) {
+	rules, err := se.store.ListActiveExceptionRules(ctx)
+	if err != nil || len(rules) == 0 {
+		return nil, err
+	}
+
+	sort.SliceStable(rules, func(i, j int) bool {
+		return scopeSpecificity(rules[i]) > scopeSpecificity(rules[j])
+	})
+
+	var containerImage *models.ContainerImage
+	var fetchedImage bool
+
+	for i := range rules {
+		r := &rules[i]
+		if r.ImagePattern != "" && !fetchedImage {
+			fetchedImage = true
+			if finding.ContainerImageID != nil {
+				containerImage, _ = se.store.GetContainerImage(ctx, finding.ContainerImageID.String())
+			}
+		}
+		if ruleMatchesScope(*r, finding, containerImage) {
+			return r, nil
+		}
+	}
+	return nil, nil
 }
 
 // ScoreAll rescores every open finding.
@@ -272,15 +451,33 @@ func (se *ScoringEngine) isInsideMaintenanceWindow(ctx context.Context, clusterI
 	return false, nil
 }
 
-// isWindowActive checks if the given maintenance window is active at the provided time.
-// It uses a simple check based on the cron expression hour/day-of-week fields.
-// For production use, a full cron parser (like robfig/cron) should be used.
+// isWindowActive reports whether the given maintenance window covers now.
+// A schedule only exposes Next(t) — the first activation strictly after t —
+// so there's no direct "am I inside a firing?" query. The standard way to
+// get one: probe Next(now - duration). The earliest activation that could
+// still be covering now is the first one after (now - duration); if that
+// activation is at or before now, we're inside it (it started somewhere in
+// (now-duration, now]  and hasn't run out yet). If it's after now, nothing
+// covers now.
 func isWindowActive(w models.MaintenanceWindow, now time.Time) bool {
-	// Parse the cron expression using robfig/cron to find the last scheduled start.
-	// For MVP simplicity, we check using a conservative approximation:
-	// if the cron expression contains the current hour, treat it as active.
-	// A proper implementation would compute the schedule and check [start, start+duration].
-	return false // Placeholder — safe default: assume outside window.
+	duration := time.Duration(w.Duration) * time.Minute
+	if duration <= 0 {
+		return false
+	}
+
+	loc, err := time.LoadLocation(w.Timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	localNow := now.In(loc)
+
+	schedule, err := cron.ParseStandard(w.CronExpr)
+	if err != nil {
+		return false // malformed expression: safe default, never active
+	}
+
+	candidateStart := schedule.Next(localNow.Add(-duration))
+	return !candidateStart.After(localNow)
 }
 
 // scoreToSeverity maps a numeric score to a severity string.
