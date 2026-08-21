@@ -9,12 +9,33 @@ import (
 	"gorm.io/gorm"
 )
 
-// CreateExceptionRule adds a new exception rule.
-func (s *Store) CreateExceptionRule(ctx context.Context, r *models.ExceptionRule) error {
+// CreateExceptionRule adds a new exception rule. isActive is a separate
+// parameter rather than read off r.IsActive, on purpose:
+//
+// IsActive has a gorm "default:true" tag, and GORM's struct-based Create
+// substitutes the tag's parsed default for ANY field whose Go value is its
+// zero value at insert time — for a plain bool that means false is
+// indistinguishable from "field never set", so there is no way to recover
+// the caller's real intent from r.IsActive alone after the fact (Select/Omit
+// does not change this — it's driven purely by the zero-value check, not by
+// column selection; an earlier version of this function tried inferring
+// intent from r.IsActive before calling Create and got it backwards for
+// every caller that simply left the field unset expecting the default,
+// which every test in internal/scoring/engine_test.go does — that version
+// is why isActive is now a required, unambiguous argument instead).
+func (s *Store) CreateExceptionRule(ctx context.Context, r *models.ExceptionRule, isActive bool) error {
 	if r.ID == uuid.Nil {
 		r.ID = uuid.New()
 	}
-	return s.DB.WithContext(ctx).Create(r).Error
+	if err := s.DB.WithContext(ctx).Create(r).Error; err != nil {
+		return err
+	}
+	if !isActive {
+		r.IsActive = false
+		return s.DB.WithContext(ctx).Model(r).Update("is_active", false).Error
+	}
+	r.IsActive = true
+	return nil
 }
 
 // ListExceptionRules returns every exception rule (active, inactive and

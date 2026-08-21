@@ -102,13 +102,29 @@ func (s *Store) UpsertNamespace(ctx context.Context, ns *models.Namespace) error
 }
 
 // UpsertNode inserts or updates a node record identified by (cluster_id, name).
-// Uses ON CONFLICT against the uq_node unique index so the existing row's primary
-// key is preserved on update (a plain FirstOrCreate duplicated rows because the
-// freshly-generated ID poisoned the lookup condition).
+// Uses ON CONFLICT against the uq_node unique index so a plain FirstOrCreate
+// doesn't duplicate rows.
+//
+// ON CONFLICT DO UPDATE alone does not report the surviving row's id back to
+// Go (proven by TestUpsertNode_StablePrimaryKeyAcrossPasses — this used to
+// just assign a fresh UUID and rely on the conflict clause, which left a
+// caller that trusted node.ID afterward holding a phantom id, exactly the
+// 2026-08-01 UpsertWorkload incident's shape). Reuse the existing row's id
+// first, same fix as UpsertWorkload.
 func (s *Store) UpsertNode(ctx context.Context, node *models.Node) error {
-	if node.ID == uuid.Nil {
+	var existing []uuid.UUID
+	if err := s.DB.WithContext(ctx).Model(&models.Node{}).
+		Where("cluster_id = ? AND name = ?", node.ClusterID, node.Name).
+		Limit(1).Pluck("id", &existing).Error; err != nil {
+		return err
+	}
+	switch {
+	case len(existing) > 0:
+		node.ID = existing[0]
+	case node.ID == uuid.Nil:
 		node.ID = uuid.New()
 	}
+
 	return s.DB.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "cluster_id"}, {Name: "name"}},

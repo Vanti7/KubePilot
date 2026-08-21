@@ -400,7 +400,7 @@ func TestScoreFinding_ExceptionRule_Suppress(t *testing.T) {
 		Name: "known false positive", RuleType: models.ExceptionRuleTypeSuppress,
 		Reason: "accepted permanently",
 	}
-	if err := s.CreateExceptionRule(ctx, rule); err != nil {
+	if err := s.CreateExceptionRule(ctx, rule, true); err != nil {
 		t.Fatalf("create exception rule: %v", err)
 	}
 
@@ -443,7 +443,7 @@ func TestScoreFinding_ExceptionRule_ReduceSeverity(t *testing.T) {
 		Name: "freeze window Q1", RuleType: models.ExceptionRuleTypeReduceSeverity,
 		ClusterID: &cluster.ID, Reason: "regulatory freeze period",
 	}
-	if err := s.CreateExceptionRule(ctx, rule); err != nil {
+	if err := s.CreateExceptionRule(ctx, rule, true); err != nil {
 		t.Fatalf("create exception rule: %v", err)
 	}
 
@@ -474,7 +474,7 @@ func TestScoreFinding_ExceptionRule_AcceptRisk(t *testing.T) {
 		Name: "accepted for Q1", RuleType: models.ExceptionRuleTypeAcceptRisk,
 		Reason: "business accepted the risk until next review",
 	}
-	if err := s.CreateExceptionRule(ctx, rule); err != nil {
+	if err := s.CreateExceptionRule(ctx, rule, true); err != nil {
 		t.Fatalf("create exception rule: %v", err)
 	}
 
@@ -513,14 +513,14 @@ func TestScoreFinding_ExceptionRule_ScopePrecedence(t *testing.T) {
 	}
 
 	global := &models.ExceptionRule{Name: "global suppress", RuleType: models.ExceptionRuleTypeSuppress, Reason: "r1"}
-	if err := s.CreateExceptionRule(ctx, global); err != nil {
+	if err := s.CreateExceptionRule(ctx, global, true); err != nil {
 		t.Fatalf("create global rule: %v", err)
 	}
 	scoped := &models.ExceptionRule{
 		Name: "workload reduce", RuleType: models.ExceptionRuleTypeReduceSeverity,
 		WorkloadID: &workload.ID, Reason: "r2",
 	}
-	if err := s.CreateExceptionRule(ctx, scoped); err != nil {
+	if err := s.CreateExceptionRule(ctx, scoped, true); err != nil {
 		t.Fatalf("create workload-scoped rule: %v", err)
 	}
 
@@ -556,7 +556,7 @@ func TestScoreFinding_ExceptionRule_ExpiredIsIgnored(t *testing.T) {
 		Name: "expired suppress", RuleType: models.ExceptionRuleTypeSuppress,
 		Reason: "was temporary", ExpiresAt: &expired,
 	}
-	if err := s.CreateExceptionRule(ctx, rule); err != nil {
+	if err := s.CreateExceptionRule(ctx, rule, true); err != nil {
 		t.Fatalf("create exception rule: %v", err)
 	}
 
@@ -595,7 +595,7 @@ func TestScoreFinding_ExceptionRule_ImagePattern(t *testing.T) {
 		Name: "pinned latest tag", RuleType: models.ExceptionRuleTypeSuppress,
 		ImagePattern: "myregistry.io/team/*:latest", Reason: "mutable tag, tracked elsewhere",
 	}
-	if err := s.CreateExceptionRule(ctx, rule); err != nil {
+	if err := s.CreateExceptionRule(ctx, rule, true); err != nil {
 		t.Fatalf("create exception rule: %v", err)
 	}
 
@@ -623,7 +623,7 @@ func TestScoreFinding_ExceptionRule_ImagePattern(t *testing.T) {
 		Name: "different repo", RuleType: models.ExceptionRuleTypeSuppress,
 		ImagePattern: "otherregistry.io/*:latest", Reason: "r",
 	}
-	if err := s.CreateExceptionRule(ctx, nonMatching); err != nil {
+	if err := s.CreateExceptionRule(ctx, nonMatching, true); err != nil {
 		t.Fatalf("create non-matching rule: %v", err)
 	}
 	// Deactivate the first rule so only the non-matching one is in play.

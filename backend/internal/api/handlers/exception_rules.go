@@ -109,6 +109,11 @@ func (h *ExceptionRuleHandler) CreateExceptionRule(c *gin.Context) {
 		}
 	}
 
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+
 	rule := &models.ExceptionRule{
 		Name:          req.Name,
 		RuleType:      req.RuleType,
@@ -120,13 +125,9 @@ func (h *ExceptionRuleHandler) CreateExceptionRule(c *gin.Context) {
 		Reason:        req.Reason,
 		ExpiresAt:     req.ExpiresAt,
 		CreatedByID:   createdBy,
-		IsActive:      true,
-	}
-	if req.IsActive != nil {
-		rule.IsActive = *req.IsActive
 	}
 
-	if err := h.store.CreateExceptionRule(c.Request.Context(), rule); err != nil {
+	if err := h.store.CreateExceptionRule(c.Request.Context(), rule, isActive); err != nil {
 		h.logger.Error("create exception rule", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create exception rule"})
 		return

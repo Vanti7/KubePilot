@@ -81,7 +81,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ## État actuel du projet
 
-**Version courante** : `v0.2.0-alpha.11` (2026-08-21)
+**Version courante** : `v0.2.0-alpha.12` (2026-08-21)
 **Canal** : alpha
 **Branche principale** : `main`
 
@@ -158,7 +158,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 - [x] Gestion des registries privés dans l'UI (Harbor, ECR, GCR, ACR) + dépôts de charts Helm
 - [x] Nettoyage en cascade des `container_images` orphelines au `DeleteWorkloadsNotSeenSince`
 - [x] Déploiement in-cluster opérationnel : Jenkins → Harbor → ArgoCD (voir `docs/installation.md` §2)
-- [~] Tests unitaires backend : comparaison semver (`internal/watcher/tags_test.go`), scale/restart/deploy manifest/set-image (`internal/k8sops`), SSRF guard (`internal/netguard`), scoring engine (`internal/scoring/engine_test.go` — formule complète, placeholder fenêtre de maintenance épinglé), findings et upsert workload (`internal/store`, dont un test de non-régression direct sur le bug UUID fantôme du 2026-08-01) tous testés ; reste le reste du `store` (clusters, helm releases/repos, registries, namespaces, métriques, secrets)
+- [x] Tests unitaires backend : comparaison semver (`internal/watcher/tags_test.go`), scale/restart/deploy manifest/set-image (`internal/k8sops`), SSRF guard (`internal/netguard`), scoring engine (`internal/scoring/engine_test.go`), et l'intégralité du `store` — findings, workloads, clusters, helm releases/repos, registries, namespaces, métriques, secrets, integrations, exception_rules. A trouvé 3 bugs réels au passage (voir `CHANGELOG.md` « Fixed »). Reste seulement Playwright (frontend) hors de ce lot
 - [ ] Tests d'intégration frontend (Playwright)
 - [x] Seed data pour démo / développement local — mode démo (`DEMO_MODE=true`), voir « Périmètre livré »
 - [x] Page Settings (gestion utilisateurs, infos système) — voir « Périmètre livré »
@@ -227,6 +227,8 @@ Voir `docs/scoring.md` pour la formule complète — `internal/scoring/engine_te
 - Défauts : `DB_URL` vide ou `LOCAL_MODE=true` → SQLite + mémoire ; sinon PostgreSQL + Redis.
 - **UUID** : assignés côté Go via un callback GORM `BeforeCreate` (`store/open.go`), pas via `gen_random_uuid()`. Ne **pas** réintroduire `default:gen_random_uuid()` dans les tags des modèles — ça casse SQLite. Les `migrations/*.sql` restent PostgreSQL-only (non exécutées par `AutoMigrate`).
 - Le cache passe par l'interface `store.Cache` (`store/cache.go`). Ne plus utiliser `store.Redis` directement.
+- **Piège GORM — un bool `gorm:"default:X"` ne peut jamais recevoir explicitement sa valeur zéro via `Create`** : GORM substitue la valeur par défaut du tag dès que le champ Go vaut sa valeur zéro à l'insertion (`false` pour un bool), sans pouvoir distinguer « non renseigné » de « explicitement false » — `Select("*")`/`Omit` n'y changent rien, c'est décidé avant la sélection de colonnes (`gorm@v1.25.10/callbacks/create.go`). Trouvé sur `ExceptionRule.IsActive` (voir `CHANGELOG.md`) : la fonction store correspondante prend désormais la valeur booléenne en paramètre explicite séparé du champ, jamais déduite du zero-value. Tout futur champ bool avec un `default` GORM doit passer par le même genre de contournement s'il doit un jour accepter `false` explicitement à la création — `Save`/`Updates` n'ont pas ce problème, seul `Create` substitue.
+- **`UpsertNode`/`UpsertSecret` avaient le même défaut qu'`UpsertWorkload`** (ID fantôme après `ON CONFLICT DO UPDATE`, voir plus bas) — non détecté avant l'écriture de tests dédiés. Toute nouvelle fonction `Upsert*` basée sur `clause.OnConflict` doit relire l'ID existant par clé naturelle **avant** l'insertion, comme `UpsertWorkload`/`UpsertNode`/`UpsertSecret` le font désormais — ne jamais faire confiance à l'ID de la struct passée en argument après un simple `ON CONFLICT DO UPDATE`.
 
 ### Connexion cluster par SSH (depuis Unreleased)
 - `Cluster.ConnectionMode == "ssh"` (ou `SSHHost` non vide) : le collector (`collector/ssh.go`) ouvre une session SSH (auth mot de passe), lit le kubeconfig du nœud (`cat`/`sudo -S cat`), construit le `rest.Config` depuis ce kubeconfig, puis **route `rest.Config.Dial` à travers le client SSH** (`sshTunnelDialer`) — donc l'API server `127.0.0.1:6443` du nœud est joint via le tunnel.

@@ -54,8 +54,22 @@ func (s *Store) ListSecrets(ctx context.Context, filter SecretFilter) ([]models.
 }
 
 // UpsertSecret inserts or updates a secret by cluster+namespace+name.
+//
+// Reuses the existing row's id first — same fix, same reason as
+// UpsertWorkload/UpsertNode: ON CONFLICT DO UPDATE alone does not report the
+// surviving row's id back to Go, so a freshly generated UUID would leave a
+// caller that trusts secret.ID afterward holding a phantom id.
 func (s *Store) UpsertSecret(ctx context.Context, secret *models.Secret) error {
-	if secret.ID == uuid.Nil {
+	var existing []uuid.UUID
+	if err := s.DB.WithContext(ctx).Model(&models.Secret{}).
+		Where("cluster_id = ? AND namespace_name = ? AND name = ?", secret.ClusterID, secret.NamespaceName, secret.Name).
+		Limit(1).Pluck("id", &existing).Error; err != nil {
+		return err
+	}
+	switch {
+	case len(existing) > 0:
+		secret.ID = existing[0]
+	case secret.ID == uuid.Nil:
 		secret.ID = uuid.New()
 	}
 	secret.LastSeenAt = time.Now()
