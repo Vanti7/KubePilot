@@ -15,6 +15,11 @@ frontend/node_modules/
 frontend/dist/
 frontend/.env.local
 
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright/.cache/
+
 # Environment
 .env
 *.env

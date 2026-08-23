@@ -81,7 +81,7 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 
 ## État actuel du projet
 
-**Version courante** : `v0.2.0-alpha.12` (2026-08-21)
+**Version courante** : `v0.2.0-alpha.13` (2026-08-23)
 **Canal** : alpha
 **Branche principale** : `main`
 
@@ -158,11 +158,13 @@ Le canal **rolling** correspond à la branche `dev` / `main` entre deux releases
 - [x] Gestion des registries privés dans l'UI (Harbor, ECR, GCR, ACR) + dépôts de charts Helm
 - [x] Nettoyage en cascade des `container_images` orphelines au `DeleteWorkloadsNotSeenSince`
 - [x] Déploiement in-cluster opérationnel : Jenkins → Harbor → ArgoCD (voir `docs/installation.md` §2)
-- [x] Tests unitaires backend : comparaison semver (`internal/watcher/tags_test.go`), scale/restart/deploy manifest/set-image (`internal/k8sops`), SSRF guard (`internal/netguard`), scoring engine (`internal/scoring/engine_test.go`), et l'intégralité du `store` — findings, workloads, clusters, helm releases/repos, registries, namespaces, métriques, secrets, integrations, exception_rules. A trouvé 3 bugs réels au passage (voir `CHANGELOG.md` « Fixed »). Reste seulement Playwright (frontend) hors de ce lot
-- [ ] Tests d'intégration frontend (Playwright)
+- [x] Tests unitaires backend : comparaison semver (`internal/watcher/tags_test.go`), scale/restart/deploy manifest/set-image (`internal/k8sops`), SSRF guard (`internal/netguard`), scoring engine (`internal/scoring/engine_test.go`), et l'intégralité du `store` — findings, workloads, clusters, helm releases/repos, registries, namespaces, métriques, secrets, integrations, exception_rules. A trouvé 3 bugs réels au passage (voir `CHANGELOG.md` « Fixed »)
+- [x] Tests d'intégration frontend (Playwright) — `frontend/e2e/`, 21 tests (auth, navigation sur les 14 routes protégées, cycle CRUD exception rules via l'UI réelle). A trouvé un vrai bug produit (intercepteur Axios qui effaçait l'erreur « invalid credentials » avec une redirection intempestive) — voir `CHANGELOG.md`
 - [x] Seed data pour démo / développement local — mode démo (`DEMO_MODE=true`), voir « Périmètre livré »
 - [x] Page Settings (gestion utilisateurs, infos système) — voir « Périmètre livré »
 - [x] Page History (audit log des actions) — table paginée/filtrable + slide-over détail, consomme `GET /api/v1/action-logs` (aucun changement backend)
+
+**Checklist beta complète au 2026-08-23.** Prochaine étape : décider du contenu de la première beta (`v0.2.0-beta.1`) — voir « Versioning sémantique » en haut de ce fichier pour la procédure de promotion de cycle.
 
 ---
 
@@ -262,6 +264,12 @@ Voir `docs/scoring.md` pour la formule complète — `internal/scoring/engine_te
 - **`internal/k8sops/manifest.go`** — deploy d'un manifest brut (server-side apply). `BuildDynamicClient` dérive un dynamic client + RESTMapper d'un `*rest.Config` (même construction que `helmops.restClientGetter`, dupliquée volontairement — pas de type partagé, `restClientGetter` est lié à l'interface Helm SDK). `ApplyManifest` traite chaque document YAML indépendamment : un `Get` préalable distingue `created`/`updated` (nécessaire aussi car le fake dynamic client de client-go v0.29 ne supporte pas la création via `Patch(ApplyPatchType)` — voir `manifest_test.go`, un `Create` explicite est fait quand l'objet n'existe pas encore, un vrai cluster accepterait les deux mais celui-ci est aussi testable). Réutilise le binding `cluster-admin` de Helm — même surface arbitraire, pas de nouveau grant RBAC.
 - **`POST /api/v1/findings/:id/remediate`** — la remédiation réelle d'un finding (par opposition au changement de statut, pur bookkeeping). Image : `k8sops.SetContainerImage`, **strategic merge patch** (`types.StrategicMergePatchType`), pas un merge-patch JSON classique — `spec.template.spec.containers` est une liste, un merge-patch la remplacerait entièrement et effacerait les autres conteneurs d'un pod multi-conteneurs (couvert par un test dédié). Helm : même séquence que `HelmHandler.UpgradeHelmRelease` (résolution dépôt + `helmops.UpgradeChart`), **dupliquée intentionnellement** plutôt que factorisée — même logique que la duplication watcher/helmops : ne pas risquer de changer le comportement de l'endpoint Helm déjà en prod.
 - **`ImageChecker`/`HelmChecker`** (`handlers/clusters.go`) exposent `CheckImage`/`CheckRelease` — méthodes déjà existantes sur `*watcher.ImageWatcher`/`*watcher.HelmWatcher` (jusqu'ici seulement appelées par leur propre boucle périodique). `RemediateFinding` les rappelle en tâche de fond après un fix réussi (3 tentatives sur ~21s) pour que le finding passe à `resolved` en quelques secondes plutôt qu'au prochain passage du watcher (`WORKER_INTERVAL_SECONDS`, 300s par défaut) — **premier goroutine lancé directement depuis un handler** dans ce codebase (jusqu'ici tout l'async passait par `TriggerSync`/le déjà-async du collector). Piège rencontré : `imgWatcher`/`helmWatcher` sont `nil` en mode démo (`cmd/server/main.go`) — les passer tel quel comme interface produirait un nil typé (interface non-nil, valeur nil), pas un nil interface ; le garde `if h.imageChecker == nil` d'un handler le manquerait et paniquerait à l'appel. Toujours passer par `if ptr != nil { iface = ptr }` explicite avant de construire le routeur.
+
+### Tests d'intégration frontend (Playwright, depuis Unreleased)
+- **`frontend/e2e/`**, config à deux `webServer` Playwright (backend Go + frontend Vite), ports dédiés 8090/3001 — distincts des ports de dev habituels (8080/3000) pour qu'une instance de dev déjà lancée par ailleurs ne soit jamais réutilisée par erreur avec les mauvaises données.
+- **`e2e/run-backend.mjs`** : le backend démarre sur une base SQLite dans un répertoire temporaire unique (`mkdtempSync`) à chaque run, pas un chemin fixe nettoyé avant coup — un `webServer.command` shell classique ne peut pas garantir un nettoyage cross-plateforme (pas de `rm` sur `cmd.exe`), et une base fraîche à chaque fois est plus simple et plus sûr qu'un nettoyage explicite.
+- **`e2e/tsconfig.json` dédié** : le `tsconfig.json` racine ne couvre que `src/` (`include: ["src"]`), donc les fichiers de test échappaient silencieusement à `tsc` (ni `npm run build` ni aucune vérification ne les couvrait). Sans ce fichier, une erreur de type dans un test ne serait jamais détectée avant l'exécution.
+- **A trouvé un vrai bug produit dès le premier lot de tests** : l'intercepteur de réponse Axios (`api/client.ts`) redirigeait vers `/login` (`window.location.href`, rechargement complet) sur **tout** 401, y compris celui de `/auth/login` lui-même en cas de mauvais mot de passe — le rechargement effaçait le composant avant que `Login.tsx` ait pu afficher « invalid credentials ». Corrigé en excluant `/auth/login` de la redirection automatique (un 401 sur cet endpoint est un résultat normal à laisser gérer au formulaire, pas une session morte).
 
 ### MCP (Model Context Protocol)
 - Sous-commande `kubepilot mcp` = serveur MCP JSON-RPC 2.0 sur stdio (`internal/mcp`), stdlib uniquement.

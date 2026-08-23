@@ -51,7 +51,13 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (error) => {
-    if (error.response?.status === 401) {
+    // A 401 from /auth/login itself just means wrong credentials — that's
+    // for the login form to show inline, not a dead session to redirect
+    // out of. Redirecting there wiped the "invalid credentials" message
+    // with a hard reload before Login.tsx's catch block ever got to render
+    // it (found via the Playwright E2E suite exercising this exact case).
+    const isLoginRequest = error.config?.url?.includes('/auth/login')
+    if (error.response?.status === 401 && !isLoginRequest) {
       localStorage.removeItem('kubepilot_token')
       window.location.href = '/login'
     }

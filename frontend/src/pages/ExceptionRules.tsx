@@ -118,8 +118,8 @@ function RuleForm({ existing, onClose }: { existing?: ExceptionRule; onClose: ()
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-1.5">
-        <label className="block text-xs font-medium text-slate-400">Name</label>
-        <input className="input w-full" placeholder="Pinned legacy base image" value={name} onChange={(e) => setName(e.target.value)} required />
+        <label htmlFor="exc-rule-name" className="block text-xs font-medium text-slate-400">Name</label>
+        <input id="exc-rule-name" className="input w-full" placeholder="Pinned legacy base image" value={name} onChange={(e) => setName(e.target.value)} required />
       </div>
 
       <div className="space-y-1.5">
